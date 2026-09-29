@@ -1226,7 +1226,7 @@ public class FailoverTextToSpeech {
 
     // Switch engines when the target engine changes and it's not the current engine.
     final String targetEngine = getTargetEngine();
-    if (TextUtils.equals(tempTtsEngine, targetEngine)) {
+    if (targetEngine != null && targetEngine.equals(tempTtsEngine)) {
       return;
     }
     if (ttsEngine == null || !ttsEngine.equals(targetEngine)) {

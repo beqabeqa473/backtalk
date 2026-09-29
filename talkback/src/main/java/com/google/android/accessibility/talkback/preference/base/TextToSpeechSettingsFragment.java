@@ -60,7 +60,7 @@ public class TextToSpeechSettingsFragment extends TalkbackBaseFragment {
 
     setUpSeekBar(
         R.string.pref_speech_volume_seekbar_key_int,
-        /* min= */ 0,
+        getResources().getInteger(R.integer.pref_speech_volume_min),
         /* max= */ 100,
         R.string.pref_speech_volume_key,
         Integer::toString);
