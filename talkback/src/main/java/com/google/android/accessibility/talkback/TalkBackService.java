@@ -91,6 +91,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.content.ContextCompat;
+import androidx.core.os.UserManagerCompat;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.braille.brailledisplay.BrailleDisplay;
 import com.google.android.accessibility.braille.interfaces.BrailleImeForTalkBack;
@@ -214,6 +215,9 @@ import com.google.android.accessibility.talkback.monitor.RingerModeAndScreenMoni
 import com.google.android.accessibility.talkback.monitor.VolumeMonitor;
 import com.google.android.accessibility.talkback.pause.PauseController;
 import com.google.android.accessibility.talkback.preference.PreferencesActivityUtils;
+import com.google.android.accessibility.talkback.scripting.ScriptHost;
+import com.google.android.accessibility.talkback.scripting.ScriptHostFactory;
+import com.google.android.accessibility.talkback.scripting.Scripts;
 import com.google.android.accessibility.talkback.selector.SelectorController;
 import com.google.android.accessibility.talkback.selector.SelectorController.SelectorEventNotifier;
 import com.google.android.accessibility.talkback.soundthemes.SoundThemes;
@@ -747,6 +751,7 @@ public class TalkBackService extends AccessibilityServiceCompat
   private DirectTouchController directTouchController;
   private PauseController pauseController;
   private AudioDeviceRouter audioDeviceRouter;
+  private @Nullable ScriptHost scriptHost;
   private InputMethodMonitor inputMethodMonitor;
   private DisplayMonitor displayMonitor;
   private ProcessorEventQueue processorEventQueue;
@@ -923,6 +928,12 @@ public class TalkBackService extends AccessibilityServiceCompat
       directTouchController = null;
     }
 
+    if (scriptHost != null) {
+      Scripts.setHost(null);
+      scriptHost.shutdown();
+      scriptHost = null;
+    }
+
     if (audioDeviceRouter != null) {
       audioDeviceRouter.shutdown();
       audioDeviceRouter = null;
@@ -1042,6 +1053,9 @@ public class TalkBackService extends AccessibilityServiceCompat
 
   @Override
   public void onAccessibilityEvent(AccessibilityEvent event) {
+    if (scriptHost != null) {
+      scriptHost.onAccessibilityEvent(event);
+    }
     // Paused Backtalk drops events, except the end of a touch that started before the pause, so
     // that nothing still thinks a finger is down after resuming. Its feedback is dropped too.
     if (PauseController.isPaused()
@@ -2287,6 +2301,8 @@ public class TalkBackService extends AccessibilityServiceCompat
                 onPauseChanged(paused);
               }
             });
+
+    startScripts();
 
     audioPlaybackMonitor = new AudioPlaybackMonitor(this);
 
@@ -3571,6 +3587,9 @@ public class TalkBackService extends AccessibilityServiceCompat
     if (directTouchController != null) {
       directTouchController.setPaused(paused);
     }
+    if (scriptHost != null) {
+      scriptHost.onPausedChanged(paused);
+    }
     BrailleImeForTalkBack brailleIme = getBrailleImeForTalkBack();
     if (brailleIme != null) {
       // The braille keyboard closes while paused, as it did while TalkBack was suspended.
@@ -3819,6 +3838,27 @@ public class TalkBackService extends AccessibilityServiceCompat
 
     if (imageCaptioner != null) {
       imageCaptioner.onUnlockedBoot();
+    }
+
+    startScripts();
+  }
+
+  private void startScripts() {
+    if (scriptHost != null || pipeline == null || !UserManagerCompat.isUserUnlocked(this)) {
+      return;
+    }
+    scriptHost =
+        ScriptHostFactory.create(
+            this,
+            pipeline.getFeedbackReturner(),
+            () -> {
+              if (pauseController != null) {
+                pauseController.resume();
+              }
+            });
+    Scripts.setHost(scriptHost);
+    if (scriptHost != null) {
+      scriptHost.onPausedChanged(PauseController.isPaused());
     }
   }
 

@@ -16,9 +16,11 @@
 package com.google.android.accessibility.utils.preference;
 
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
 import android.view.MenuItem;
+import com.google.android.accessibility.utils.EdgeToEdge;
 import com.google.android.accessibility.utils.FeatureSupport;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -33,6 +35,12 @@ public abstract class BasePreferencesActivity extends AppCompatActivity {
   public static final String FRAGMENT_ARGS = "FragmentArgs";
 
   private static final int DEFAULT_CONTAINER_ID = android.R.id.content;
+
+  @Override
+  protected void onPostCreate(@Nullable Bundle savedInstanceState) {
+    super.onPostCreate(savedInstanceState);
+    EdgeToEdge.fitToSafeArea(this);
+  }
 
   /**
    * If action-bar back key button is pressed, end this sub-activity when there is no fragment in

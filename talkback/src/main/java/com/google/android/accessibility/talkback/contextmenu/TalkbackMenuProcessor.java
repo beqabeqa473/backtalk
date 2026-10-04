@@ -16,12 +16,15 @@
 
 package com.google.android.accessibility.talkback.contextmenu;
 
+import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
+
 import android.content.SharedPreferences;
 import android.view.MenuInflater;
 import androidx.annotation.BoolRes;
 import androidx.annotation.StringRes;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.talkback.ActorState;
+import com.google.android.accessibility.talkback.Feedback;
 import com.google.android.accessibility.talkback.Pipeline;
 import com.google.android.accessibility.talkback.R;
 import com.google.android.accessibility.talkback.TalkBackService;
@@ -30,12 +33,17 @@ import com.google.android.accessibility.talkback.actor.gemini.GeminiConfiguratio
 import com.google.android.accessibility.talkback.contextmenu.ContextMenuItem.DeferredType;
 import com.google.android.accessibility.talkback.flags.FeatureFlagReader;
 import com.google.android.accessibility.talkback.menurules.NodeMenuRuleProcessor;
+import com.google.android.accessibility.talkback.scripting.ItemInspector;
+import com.google.android.accessibility.talkback.scripting.ScriptMenuItem;
+import com.google.android.accessibility.talkback.scripting.Scripts;
 import com.google.android.accessibility.utils.FeatureSupport;
 import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.SettingsUtils;
 import com.google.android.accessibility.utils.SharedPreferencesUtils;
 import com.google.android.accessibility.utils.monitor.ScreenMonitor;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Configure dynamic menu items on the talkback context menu. */
@@ -63,6 +71,7 @@ public class TalkbackMenuProcessor {
    */
   private static final int ORDER_TYPO_SUGGESTIONS = 1;
   private static final int ORDER_ACTIONS = 2;
+  private static final int ORDER_SCRIPT_COMMANDS = 3;
   private static final int ORDER_PAGE_NAVIGATION = 4;
   public static final int ORDER_LABELS = 5;
   public static final int ORDER_SUMMARIZE_VIEW = 6;
@@ -73,6 +82,8 @@ public class TalkbackMenuProcessor {
   private static final int ORDER_SHOW_HIDE_SCREEN = 20;
   private static final int ORDER_PAUSE_BACKTALK = 21;
   private static final int ORDER_SYSTEM_ACTIONS = 24;
+  private static final int ORDER_INSPECT_ITEM = 26;
+  private static final int ORDER_COPY_SCREEN_TREE = ORDER_INSPECT_ITEM;
   private static final int ORDER_TELL_TIME = 27;
 
   private final TalkBackService service;
@@ -152,6 +163,23 @@ public class TalkbackMenuProcessor {
     addLanguageMenuIfValid(menu);
     // System Action
     addWindowActionMenu(menu);
+    addScriptCommands(menu);
+    addScriptTool(
+        menu,
+        R.id.inspect_item,
+        ORDER_INSPECT_ITEM,
+        R.string.pref_show_context_menu_inspect_item_setting_key,
+        R.bool.pref_show_context_menu_inspect_item_default,
+        R.string.shortcut_inspect_item,
+        node -> ItemInspector.inspect(service, node));
+    addScriptTool(
+        menu,
+        R.id.copy_screen_tree,
+        ORDER_COPY_SCREEN_TREE,
+        R.string.pref_show_context_menu_copy_screen_tree_setting_key,
+        R.bool.pref_show_context_menu_copy_screen_tree_default,
+        R.string.shortcut_copy_screen_tree,
+        node -> ItemInspector.copyScreenTree(service, node));
 
     setMenuItemShowsDialog(
         menu,
@@ -536,6 +564,50 @@ public class TalkbackMenuProcessor {
     if (!WindowNavigationMenuProcessor.prepareWindowSubMenu(service, subMenu, pipeline)) {
       menu.removeItem(R.id.window_menu);
     }
+  }
+
+  private void addScriptCommands(ContextMenu menu) {
+    for (ScriptMenuItem scriptItem : Scripts.menuItems()) {
+      addAfterMenuCloses(
+          menu, R.id.script_command, ORDER_SCRIPT_COMMANDS, scriptItem.getTitle(), scriptItem::run);
+    }
+  }
+
+  private void addScriptTool(
+      ContextMenu menu,
+      int itemId,
+      int order,
+      @StringRes int showKey,
+      @BoolRes int showDefault,
+      @StringRes int title,
+      Function<@Nullable AccessibilityNodeInfoCompat, String> tool) {
+    menu.removeItem(itemId);
+    if (showMenuItem(showKey, showDefault)) {
+      addAfterMenuCloses(
+          menu,
+          itemId,
+          order,
+          service.getString(title),
+          node -> pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(tool.apply(node))));
+    }
+  }
+
+  private void addAfterMenuCloses(
+      ContextMenu menu,
+      int itemId,
+      int order,
+      CharSequence title,
+      Consumer<@Nullable AccessibilityNodeInfoCompat> action) {
+    @Nullable AccessibilityNodeInfoCompat node = currentNode;
+    ContextMenuItem item = menu.add(0, itemId, order, title);
+    item.setOnMenuItemClickListener(
+        clicked -> {
+          action.accept(node);
+          return true;
+        });
+    item.setDeferredType(DeferredType.WINDOWS_STABLE);
+    item.setSkipRefocusEvents(true);
+    item.setSkipWindowEvents(true);
   }
 
   private static void setMenuItemShowsDialog(ContextMenu menu, int itemId, boolean showsDialog) {

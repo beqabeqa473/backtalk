@@ -52,6 +52,7 @@ public final class GranularityTraversal {
   static final int TALKBACK_SUPPORTED_GRANULARITIES =
       AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER
           | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD
+          | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE
           | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_PARAGRAPH;
 
   private static final int ACCESSIBILITY_CURSOR_POSITION_UNDEFINED = -1;
@@ -290,7 +291,11 @@ public final class GranularityTraversal {
       return null;
     }
 
-    return GranularityIterator.getIteratorForGranularity(text, granularity);
+    return GranularityIterator.getIteratorForGranularity(
+        text,
+        granularity == AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE
+            ? AccessibilityNodeInfo.MOVEMENT_GRANULARITY_PARAGRAPH
+            : granularity);
   }
 
   /**
@@ -309,8 +314,11 @@ public final class GranularityTraversal {
     if (AccessibilityNodeInfoUtils.isTextSelectable(node) && !TextUtils.isEmpty(nodeText)) {
       return nodeText;
     }
-
-    return node.getContentDescription();
+    CharSequence description = node.getContentDescription();
+    if (!TextUtils.isEmpty(description) || node.getMovementGranularities() != 0) {
+      return description;
+    }
+    return nodeText;
   }
 
   private int getCursorPosition(AccessibilityNodeInfoCompat node) {

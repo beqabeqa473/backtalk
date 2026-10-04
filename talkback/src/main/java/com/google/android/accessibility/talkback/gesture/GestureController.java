@@ -104,6 +104,8 @@ import com.google.android.accessibility.talkback.menurules.RuleTextFormatting;
 import com.google.android.accessibility.talkback.monitor.BatteryMonitor;
 import com.google.android.accessibility.talkback.monitor.VolumeMonitor;
 import com.google.android.accessibility.talkback.monitor.VolumeMonitor.VolumeChangedListener;
+import com.google.android.accessibility.talkback.scripting.ItemInspector;
+import com.google.android.accessibility.talkback.scripting.Scripts;
 import com.google.android.accessibility.talkback.selector.SelectorController;
 import com.google.android.accessibility.talkback.selector.SelectorController.AnnounceType;
 import com.google.android.accessibility.talkback.selector.SelectorController.Setting;
@@ -666,6 +668,18 @@ public class GestureController {
     } else if (action.equals(service.getString(R.string.shortcut_value_announce_status))) {
       result =
           pipeline.returnFeedback(eventId, Feedback.speech(statusReader.describe()));
+    } else if (action.equals(service.getString(R.string.shortcut_value_inspect_item))) {
+      AccessibilityNodeInfoCompat focused =
+          accessibilityFocusMonitor.getAccessibilityFocus(false);
+      result =
+          pipeline.returnFeedback(
+              eventId, Feedback.speech(ItemInspector.inspect(service, focused)));
+    } else if (action.equals(service.getString(R.string.shortcut_value_copy_screen_tree))) {
+      AccessibilityNodeInfoCompat focused =
+          accessibilityFocusMonitor.getAccessibilityFocus(false);
+      result =
+          pipeline.returnFeedback(
+              eventId, Feedback.speech(ItemInspector.copyScreenTree(service, focused)));
     } else if (FeatureFlagReader.enableAnnounceCurrentTitle(service)
         && action.equals(service.getString(R.string.shortcut_value_announce_current_title))) {
       result =
@@ -750,6 +764,10 @@ public class GestureController {
         gestureId,
         GestureShortcutMapping.getGestureString(service, gestureId),
         action);
+    String fallbackAction = action;
+    if (Scripts.onGesture(gestureId, () -> performAction(fallbackAction, eventId))) {
+      return;
+    }
     performAction(action, eventId);
   }
 
@@ -835,6 +853,9 @@ public class GestureController {
         fingerprintGestureId,
         GestureShortcutMapping.getFingerprintGestureString(service, fingerprintGestureId),
         action);
+    if (Scripts.onFingerprintGesture(fingerprintGestureId, () -> performAction(action, eventId))) {
+      return;
+    }
     performAction(action, eventId);
   }
 
