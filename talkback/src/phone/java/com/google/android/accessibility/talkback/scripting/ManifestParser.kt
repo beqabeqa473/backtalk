@@ -68,7 +68,7 @@ class ManifestParser(private val strict: Boolean) {
     val rule =
       ScriptRule(
         id = json.optionalString("id"),
-        match = json.optJSONObject("match")?.let(::query),
+        match = json.optJSONObject("match")?.let { query(it) },
         window = json.optionalString("window"),
         activity = json.optionalString("activity"),
         label = json.optionalString("label"),
@@ -171,12 +171,13 @@ class ManifestParser(private val strict: Boolean) {
     return rules
   }
 
-  private fun query(json: JSONObject): NodeQuery {
+  private fun query(json: JSONObject, nested: Boolean = false): NodeQuery {
     json.allowOnly(NodeQuery.KEYS, "match")
     manifestCheck(!json.has("inside") || json.opt("inside") is JSONObject) {
       "inside is an object, like match"
     }
-    json.optJSONObject("inside")?.let(::query)
+    manifestCheck(!nested || !json.has("inside")) { "inside can't hold another inside" }
+    json.optJSONObject("inside")?.let { query(it, nested = true) }
     val query = NodeQuery.of(json)
     manifestCheck(query != NodeQuery()) { "A match needs at least one field" }
     checkRole(query.role)
@@ -273,7 +274,7 @@ class ManifestParser(private val strict: Boolean) {
     return list.map { json ->
       json.allowOnly(NAVIGATION_KEYS, "navigation")
       val title = json.requiredString("title")
-      val match = json.optJSONObject("match")?.let(::query) ?: NodeQuery()
+      val match = json.optJSONObject("match")?.let { query(it) } ?: NodeQuery()
       val query = json.optionalString("id")?.let { match.copy(id = it) } ?: match
       manifestCheck(query != NodeQuery()) { "The navigation item $title needs id or match" }
       ScriptNavigation(title, query)

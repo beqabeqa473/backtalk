@@ -145,6 +145,10 @@ class ManifestParserTest {
       "inside is an object" in rejectsRule("""{"match":{"inside":"row"},"hide":true}""")
     )
     assertTrue("colour" in rejectsRule("""{"match":{"inside":{"colour":"red"}},"hide":true}"""))
+    assertTrue(
+      "another inside" in
+        rejectsRule("""{"match":{"inside":{"id":"a","inside":{"id":"b"}}},"hide":true}""")
+    )
   }
 
   @Test

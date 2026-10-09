@@ -41,6 +41,8 @@ class LazyScriptHost(
   private val resume: Runnable,
 ) : ScriptHost, ScriptStore.Listener {
   private val store = ScriptStore.get(service)
+  // Outlives the engine, so that a restart still knows which activity is in front.
+  private val activation = ScriptActivation(service)
   @Volatile private var manager: ScriptManager? = null
   private var paused = false
   private var screenOn = service.getSystemService(PowerManager::class.java)?.isInteractive != false
@@ -108,7 +110,7 @@ class LazyScriptHost(
   private fun start() {
     try {
       System.loadLibrary("backtalkquickjs")
-      manager = ScriptManager(service, ScriptFeedback(service, feedback, resume))
+      manager = ScriptManager(service, ScriptFeedback(service, feedback, resume), activation)
     } catch (e: UnsatisfiedLinkError) {
       LogUtils.e(TAG, "Scripts are unavailable: %s", e)
       unavailable = true
@@ -116,7 +118,12 @@ class LazyScriptHost(
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent) {
-    manager?.onAccessibilityEvent(event)
+    val running = manager
+    if (running != null) {
+      running.onAccessibilityEvent(event)
+    } else if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+      activation.onWindowStateChanged(event)
+    }
   }
 
   override fun rewriteFocusSpeech(

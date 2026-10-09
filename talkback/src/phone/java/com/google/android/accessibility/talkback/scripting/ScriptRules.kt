@@ -60,6 +60,10 @@ private constructor(
   val hidesAny = entries.any { it.rule.hide != Hide.NONE || it.rule.group }
   private val hidesInside = entries.any { it.rule.hide == Hide.ALL || it.rule.group }
 
+  /** Whether an answer for an item can change when the items around it do. */
+  val dependsOnAncestors =
+    hidesInside || (entries + actionEntries).any { it.rule.match?.inside != null }
+
   fun resolve(node: AccessibilityNodeInfoCompat, aspect: RuleAspect = RuleAspect.ANY): NodeRule? {
     if (changes.isEmpty || aspect !in aspects) {
       return null

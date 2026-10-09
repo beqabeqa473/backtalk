@@ -93,7 +93,7 @@ data class NodeQuery(
         "inside",
       )
 
-    fun of(json: JSONObject): NodeQuery {
+    fun of(json: JSONObject, nested: Boolean = false): NodeQuery {
       fun text(key: String) = json.optString(key).ifEmpty { null }
       return NodeQuery(
         id = text("id"),
@@ -104,7 +104,8 @@ data class NodeQuery(
         role = text("role"),
         clickable = if (json.has("clickable")) json.getBoolean("clickable") else null,
         parentId = text("parentId"),
-        inside = json.optJSONObject("inside")?.let(::of),
+        // One level: each further level would walk every ancestor again for every ancestor.
+        inside = if (nested) null else json.optJSONObject("inside")?.let { of(it, nested = true) },
       )
     }
 

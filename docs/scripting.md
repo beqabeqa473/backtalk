@@ -74,7 +74,7 @@ A script with `apps` is loaded when one of its apps comes to the front and unloa
 
 A script without `apps` runs in every app and is loaded as long as it's turned on.
 
-Scripts never change Backtalk's own screens. Rules, speech changes, gestures, keys, menu items and reading controls from scripts don't apply there, and a script can't name Backtalk in `apps`. This is so that **Advanced settings** > **Scripts** always works, whatever a script does.
+Scripts never change Backtalk's own screens. Rules, speech changes, gestures, keys, menu items and reading controls from scripts don't apply there, and a script can't name Backtalk in `apps`. While a Backtalk screen is in front, calls that need the `screen`, `actions`, `system` or `dialogs` permission throw an error, `backtalk.speak` doesn't interrupt, and scripts get no events from Backtalk itself. This is so that **Advanced settings** > **Scripts** always works, whatever a script does.
 
 Scripts are also unloaded while the screen is off, while Backtalk is paused, and while **Turn off all scripts** is on. Timers and requests end when a script is unloaded.
 
@@ -166,7 +166,7 @@ A query finds items. It's an id as text, or an object with any of these; an item
 | `role` | The role the app gave the item. |
 | `clickable` | `true` or `false`. |
 | `parentId` | The view id of the item's parent. |
-| `inside` | A query that one of the items around it must match: its parent, the parent's parent, and so on. `{ className: 'Button', inside: { textContains: 'play video' } }` matches every button in a video's row, and not the row itself. |
+| `inside` | A query that one of the items around it must match: its parent, the parent's parent, and so on. `{ className: 'Button', inside: { textContains: 'play video' } }` matches every button in a video's row, and not the row itself. `inside` can't hold another `inside`. |
 
 ## Items
 

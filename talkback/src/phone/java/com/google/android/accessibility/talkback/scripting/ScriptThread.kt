@@ -25,14 +25,27 @@ import android.os.SystemClock
  */
 object ScriptThread {
   @Volatile private var busySince = 0L
+  // Restarting the engine starts a new script thread while the old one may still be finishing, so
+  // only the thread that set the time clears it.
+  @Volatile private var owner: Thread? = null
+  private val depth = ThreadLocal<Int>()
 
   fun <T> busy(work: () -> T): T {
-    val outer = busySince
-    if (outer == 0L) busySince = SystemClock.uptimeMillis()
+    val outer = depth.get() ?: 0
+    val thread = Thread.currentThread()
+    if (outer == 0) {
+      owner = thread
+      busySince = SystemClock.uptimeMillis()
+    }
+    depth.set(outer + 1)
     try {
       return work()
     } finally {
-      busySince = outer
+      depth.set(outer)
+      if (outer == 0 && owner === thread) {
+        busySince = 0L
+        owner = null
+      }
     }
   }
 

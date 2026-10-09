@@ -93,7 +93,7 @@ class ScriptRuntime(
   }
 
   fun dispatch(type: String, data: Any?, timeLimitMs: Long = CALL_LIMIT_MS): String? {
-    val runtime = js?.takeUnless { it.isClosed } ?: return null
+    val runtime = js?.takeUnless { it.isClosed || manager.isClosed } ?: return null
     return try {
       val event = jsonObject("type" to type, "data" to data).toString()
       ScriptThread.busy { timed(timeLimitMs) { runtime.call("__bt_dispatch", event, timeLimitMs) } }
@@ -165,6 +165,11 @@ class ScriptRuntime(
   override fun call(method: String, json: String?): String? {
     val call = calls[method] ?: apiError("Backtalk has no $method")
     call.permission?.let(::requirePermission)
+    // Otherwise a script could keep Backtalk's settings from being used, or turn its own
+    // permissions back on there.
+    apiCheck(call.permission !in REFUSED_IN_BACKTALK || !manager.inBacktalk) {
+      "Scripts can't use ${call.permission?.key} on Backtalk's own screens"
+    }
     val result = call.handle(json?.let { JSONObject(it) } ?: JSONObject())
     return result.takeUnless { it == Unit }?.let(::jsonOf)
   }
@@ -195,7 +200,8 @@ class ScriptRuntime(
       manager.appInfo()
     }
     on("speak", SPEECH) {
-      manager.feedback.speak(it.optString("text"), it.optBoolean("interrupt"), voice(it))
+      val interrupt = it.optBoolean("interrupt") && !manager.inBacktalk
+      manager.feedback.speak(it.optString("text"), interrupt, voice(it))
     }
     on("audio") { playAudio(it) }
     on("sound") { args ->
@@ -499,6 +505,7 @@ class ScriptRuntime(
       ?: ScriptLog.Level.INFO
 
   companion object {
+    private val REFUSED_IN_BACKTALK = setOf(SCREEN, ACTIONS, SYSTEM, DIALOGS)
     const val LOAD_LIMIT_MS = 2000L
     const val CALL_LIMIT_MS = 2000L
     private const val MEMORY_LIMIT = 32L * 1024 * 1024

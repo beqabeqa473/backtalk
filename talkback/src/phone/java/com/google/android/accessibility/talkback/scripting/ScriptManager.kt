@@ -30,8 +30,11 @@ import com.google.android.accessibility.talkback.focusmanagement.TraversalTreeCa
 import java.util.concurrent.CountDownLatch
 import org.json.JSONObject
 
-class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedback) :
-  ScriptHost, ScriptStore.Listener {
+class ScriptManager(
+  val service: AccessibilityService,
+  val feedback: ScriptFeedback,
+  private val activation: ScriptActivation,
+) : ScriptHost, ScriptStore.Listener {
 
   val store: ScriptStore = ScriptStore.get(service)
   val dialogs = ScriptDialogs(service)
@@ -39,7 +42,6 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   private val mainHandler = Handler(Looper.getMainLooper())
   private val scriptHandler = startScriptThread()
   private val loaded = LinkedHashMap<String, ScriptRuntime>()
-  private val activation = ScriptActivation(service)
   private val speechHooks = ScriptSpeechHooks(scriptHandler)
   private val events = ScriptEventDelivery(scriptHandler) { loaded.values }
   private val actions = ScriptItemActions(scriptHandler, feedback)
@@ -80,8 +82,16 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
         if (activation.onFocusMoved(event.packageName?.toString())) {
           evaluate()
         }
+      // A list reuses its row views, so what an item is inside changes without the item changing.
+      AccessibilityEvent.TYPE_VIEW_SCROLLED,
+      AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
+        if (rules.dependsOnAncestors) {
+          rules.clearCache()
+        }
     }
-    events.deliver(event)
+    if (event.packageName?.toString() != service.packageName) {
+      events.deliver(event)
+    }
   }
 
   override fun rewriteFocusSpeech(
@@ -203,7 +213,9 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
         val key = "${bound.runtime.id}/navigation/${bound.index}"
         ScriptReadingControl(key, bound.navigation.title) { isNext ->
           // The search visits every item on screen, so it stays off the main thread.
-          onScriptThread { navigator.move(bound.runtime, bound.navigation.query, isNext) }
+          onScriptThread {
+            ScriptThread.busy { navigator.move(bound.runtime, bound.navigation.query, isNext) }
+          }
         }
       }
 
@@ -219,7 +231,9 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
     closed = true
     store.removeListener(this)
     mainHandler.removeCallbacks(evaluateRunnable)
-    onScriptThread {
+    // What scripts still had queued is dropped, so that turning scripts off stops them now.
+    scriptHandler.removeCallbacksAndMessages(null)
+    scriptHandler.postAtFrontOfQueue {
       loaded.values.forEach(ScriptRuntime::close)
       loaded.clear()
       speechHooks.clear()
@@ -248,6 +262,13 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
 
   fun appInfo(): JSONObject = activation.appInfo
 
+  val isClosed: Boolean
+    get() = closed
+
+  /** Whether a Backtalk screen is in front, where scripts can't read, act or show anything. */
+  val inBacktalk: Boolean
+    get() = activation.inBacktalk
+
   fun focusedNode(): AccessibilityNodeInfoCompat? =
     service
       .findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
@@ -267,6 +288,10 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   fun onScriptError(runtime: ScriptRuntime, message: String, interrupted: Boolean) {
     val id = runtime.id
     ScriptLog.add(id, ScriptLog.Level.ERROR, message)
+    // Calls are refused on Backtalk's own screens, which is no fault of the script.
+    if (activation.inBacktalk && !interrupted) {
+      return
+    }
     if (!errors.tooMany(id, interrupted) || store.find(id)?.enabled != true) {
       return
     }
