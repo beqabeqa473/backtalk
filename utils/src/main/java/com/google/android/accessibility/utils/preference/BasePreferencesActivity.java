@@ -17,10 +17,10 @@ package com.google.android.accessibility.utils.preference;
 
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.view.View;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
 import android.view.MenuItem;
-import com.google.android.accessibility.utils.EdgeToEdge;
 import com.google.android.accessibility.utils.FeatureSupport;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -36,12 +36,6 @@ public abstract class BasePreferencesActivity extends AppCompatActivity {
 
   private static final int DEFAULT_CONTAINER_ID = android.R.id.content;
 
-  @Override
-  protected void onPostCreate(@Nullable Bundle savedInstanceState) {
-    super.onPostCreate(savedInstanceState);
-    EdgeToEdge.fitToSafeArea(this);
-  }
-
   /**
    * If action-bar back key button is pressed, end this sub-activity when there is no fragment in
    * the stack. Otherwise, it will go to last fragment.
@@ -56,6 +50,31 @@ public abstract class BasePreferencesActivity extends AppCompatActivity {
     } else {
       super.onBackPressed();
     }
+  }
+
+  @Override
+  protected void onPostCreate(@Nullable Bundle savedInstanceState) {
+    super.onPostCreate(savedInstanceState);
+    readActionBarFirst();
+  }
+
+  /**
+   * Keeps the action bar, with Navigate up and the screen's title, first in the reading order.
+   * Android 15 and later draw the screen edge to edge, so the content starts at the top of the
+   * screen, under the action bar, rather than below it. Both then start at the same place, and
+   * Android puts the taller content first, so the action bar came last. Android only passes on the
+   * order between views it gives to accessibility services, so both containers are given, though
+   * they have nothing to focus themselves.
+   */
+  private void readActionBarFirst() {
+    View actionBar = findViewById(androidx.appcompat.R.id.action_bar_container);
+    View content = findViewById(android.R.id.content);
+    if (actionBar == null || content == null) {
+      return;
+    }
+    actionBar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+    content.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+    actionBar.setAccessibilityTraversalBefore(android.R.id.content);
   }
 
   /**

@@ -200,9 +200,7 @@ public class VoiceCommandActor implements SpeechRecognizerRequester {
         SpeakOptions.create()
             .setFlags(
                 FeedbackItem.FLAG_NO_HISTORY
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+                    | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL);
     pipeline.returnFeedback(
         // TODO: Add performance EventId support for speech commands.
         EVENT_ID_UNTRACKED,
@@ -214,9 +212,7 @@ public class VoiceCommandActor implements SpeechRecognizerRequester {
         SpeakOptions.create()
             .setFlags(
                 FeedbackItem.FLAG_NO_HISTORY
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+                    | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL);
     pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(text, speakOptions));
   }
 }

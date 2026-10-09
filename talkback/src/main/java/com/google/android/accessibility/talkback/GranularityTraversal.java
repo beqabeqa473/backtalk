@@ -18,6 +18,7 @@ package com.google.android.accessibility.talkback;
 
 import static com.google.android.accessibility.talkback.Feedback.EditText.Action.MOVE_CURSOR;
 
+import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.annotation.Nullable;
@@ -34,6 +35,7 @@ import com.google.android.accessibility.utils.input.CursorGranularity;
 import com.google.android.accessibility.utils.input.GranularityIterator;
 import com.google.android.accessibility.utils.input.GranularityIterator.TextSegmentIterator;
 import com.google.android.accessibility.utils.input.TextEventInterpreter;
+import com.google.android.accessibility.utils.output.EmojiSpeech;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
 import java.util.Map;
 import java.util.Optional;
@@ -52,7 +54,6 @@ public final class GranularityTraversal {
   static final int TALKBACK_SUPPORTED_GRANULARITIES =
       AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER
           | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD
-          | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE
           | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_PARAGRAPH;
 
   private static final int ACCESSIBILITY_CURSOR_POSITION_UNDEFINED = -1;
@@ -273,6 +274,71 @@ public final class GranularityTraversal {
   }
 
   /**
+   * Moves the cursor of text the framework moves through, a focused edit text or selectable text,
+   * over the next or previous word when that word is an emoji, and Backtalk names emoji. The
+   * framework's words skip emoji, which left them unheard; in an edit text, the next delete would
+   * remove one. Other words, and other granularities, are left to the framework, so its cursor
+   * stays the only one.
+   *
+   * @return {@code true} if the cursor moved over an emoji.
+   */
+  public boolean traverseEmojiWordInFrameworkText(
+      AccessibilityNodeInfoCompat node, boolean forward, EventId eventId) {
+    // Checked first, so that moving by word costs nothing more unless Backtalk names emoji.
+    if (!EmojiSpeech.stopsOnEmojiWords()) {
+      return false;
+    }
+    boolean editing = Role.getRole(node) == Role.ROLE_EDIT_TEXT && node.isFocused();
+    if (!(editing || AccessibilityNodeInfoUtils.isNonEditableSelectableText(node))
+        || !node.refresh()) {
+      return false;
+    }
+    CharSequence text = getIterableTextForAccessibility(node);
+    if (!EmojiSpeech.hasEmojiWords(text)) {
+      return false;
+    }
+    int current = forward ? node.getTextSelectionEnd() : node.getTextSelectionStart();
+    if (current < 0) {
+      // No cursor yet: the framework starts from the end the move goes away from.
+      current = forward ? 0 : text.length();
+    }
+    if (current > text.length()) {
+      return false;
+    }
+    TextSegmentIterator iterator =
+        GranularityIterator.getIteratorForGranularity(text, CursorGranularity.WORD.value);
+    int[] range = forward ? iterator.following(current) : iterator.preceding(current);
+    if (range == null || EmojiSpeech.emojiWordEnd(text, range[0]) != range[1]) {
+      return false;
+    }
+    int cursor = forward ? range[1] : range[0];
+    if (editing) {
+      pipelineReturner.ifPresent(
+          feedbackReturner ->
+              feedbackReturner.returnFeedback(
+                  Feedback.create(
+                      eventId,
+                      Feedback.part()
+                          .setEdit(Feedback.edit(node, MOVE_CURSOR).setCursorIndex(cursor).build())
+                          .build())));
+    } else {
+      // Selectable text keeps its traversal cursor as its selection, as the framework does.
+      Bundle args = new Bundle();
+      args.putInt(AccessibilityNodeInfoCompat.ACTION_ARGUMENT_SELECTION_START_INT, cursor);
+      args.putInt(AccessibilityNodeInfoCompat.ACTION_ARGUMENT_SELECTION_END_INT, cursor);
+      pipelineReturner.ifPresent(
+          feedbackReturner ->
+              feedbackReturner.returnFeedback(
+                  eventId,
+                  Feedback.nodeAction(
+                      node, AccessibilityNodeInfoCompat.ACTION_SET_SELECTION, args)));
+    }
+    sendViewTextTraversedAtGranularityEvent(
+        range[0], range[1], text, CursorGranularity.WORD.value, node, eventId);
+    return true;
+  }
+
+  /**
    * Gets the iterator for granularity traversal. Talkback can handle only character, word and
    * paragraph granularity movements. If the granularity is not supported by Talkback or the text is
    * null, it returns {@code null}.
@@ -291,11 +357,7 @@ public final class GranularityTraversal {
       return null;
     }
 
-    return GranularityIterator.getIteratorForGranularity(
-        text,
-        granularity == AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE
-            ? AccessibilityNodeInfo.MOVEMENT_GRANULARITY_PARAGRAPH
-            : granularity);
+    return GranularityIterator.getIteratorForGranularity(text, granularity);
   }
 
   /**
@@ -314,11 +376,8 @@ public final class GranularityTraversal {
     if (AccessibilityNodeInfoUtils.isTextSelectable(node) && !TextUtils.isEmpty(nodeText)) {
       return nodeText;
     }
-    CharSequence description = node.getContentDescription();
-    if (!TextUtils.isEmpty(description) || node.getMovementGranularities() != 0) {
-      return description;
-    }
-    return nodeText;
+
+    return node.getContentDescription();
   }
 
   private int getCursorPosition(AccessibilityNodeInfoCompat node) {

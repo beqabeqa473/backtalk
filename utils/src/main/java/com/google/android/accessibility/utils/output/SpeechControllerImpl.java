@@ -32,6 +32,7 @@ import android.content.res.Configuration;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.media.AudioRecordingConfiguration;
 import android.os.Bundle;
 import android.os.Handler;
@@ -598,6 +599,11 @@ public class SpeechControllerImpl implements SpeechController {
     this.speechListener = speechListener;
   }
 
+  /** Speaks the usual way from now on, rather than through low-latency audio. */
+  public void speakWithoutLowLatencyAudio() {
+    failoverTts.speakWithoutLowLatencyAudio();
+  }
+
   @Override
   public void setHandleTtsCallbackInHandlerThread(boolean shouldHandleTtsCallBackInHandlerThread) {
     this.shouldHandleTtsCallBackInHandlerThread = shouldHandleTtsCallBackInHandlerThread;
@@ -760,7 +766,10 @@ public class SpeechControllerImpl implements SpeechController {
       return false;
     }
 
-    CharSequence copyableText = SpannableUtils.getCopyableText(item.getAggregateText());
+    // Copy what was on screen, such as emoji, not the words speech used for it.
+    CharSequence copyableText =
+        EmojiSpeech.restoreOriginalText(
+            SpannableUtils.getCopyableText(item.getAggregateText()));
 
     if (TextUtils.isEmpty(copyableText)) {
       return false;
@@ -829,9 +838,7 @@ public class SpeechControllerImpl implements SpeechController {
      */
     final FeedbackItem newItem = new FeedbackItem(item);
     newItem.addFlag(
-        FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-            | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-            | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+        FeedbackItem.FLAG_FORCE_FEEDBACK_ALL);
     speak(
         /* item= */ newItem,
         /* queueMode= */ QUEUE_MODE_BIT_FLUSH_ALL,
@@ -854,7 +861,8 @@ public class SpeechControllerImpl implements SpeechController {
 
   /** Spells the given utterance. */
   public boolean spellUtterance(FeedbackItem utterance) {
-    CharSequence text = utterance.getAggregateText();
+    // Spell what was on screen, such as emoji, not the words speech used for it.
+    CharSequence text = EmojiSpeech.restoreOriginalText(utterance.getAggregateText());
     /*
      * We spell the utterance then append a copy of the original utterance to the history.
      * This guarantees that it is consistently the last item in the history.
@@ -875,6 +883,13 @@ public class SpeechControllerImpl implements SpeechController {
 
     final SpannableStringBuilder builder = new SpannableStringBuilder();
     for (int i = 0; i < text.length(); i++) {
+      // An emoji, which may be many characters, is spelled as one, by its name.
+      int emojiEnd = EmojiSpeech.emojiEnd(mContext, text, i);
+      if (emojiEnd > i) {
+        StringBuilderUtils.appendWithSeparator(builder, text.subSequence(i, emojiEnd));
+        i = emojiEnd - 1;
+        continue;
+      }
       final String cleanedChar = SpeechCleanupUtils.getCleanValueFor(mContext, text.charAt(i));
 
       StringBuilderUtils.appendWithSeparator(builder, cleanedChar);
@@ -883,9 +898,7 @@ public class SpeechControllerImpl implements SpeechController {
     options.mQueueMode = QUEUE_MODE_BIT_INTERRUPT | QUEUE_MODE_BIT_UNINTERRUPTIBLE_BY_NEW_SPEECH;
     options.mFlags =
         FeedbackItem.FLAG_NO_HISTORY
-            | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-            | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-            | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE;
+            | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL;
     options.mUtteranceGroup = UTTERANCE_GROUP_DEFAULT;
     speak(builder, /* eventId= */ null, options);
     return true;
@@ -1163,6 +1176,7 @@ public class SpeechControllerImpl implements SpeechController {
 
     text = replaceSpanByContentDescription(text);
     text = replaceBrailleSymbolByDescription(mContext, text);
+    text = EmojiSpeech.process(mContext, text);
     final FeedbackItem pendingItem =
         FeedbackProcessingUtils.generateFeedbackItemFromInput(
             mContext,
@@ -1773,6 +1787,8 @@ public class SpeechControllerImpl implements SpeechController {
       currentFeedbackItem = null;
       requestPause = true;
       failoverTts.stopFromTalkBack();
+      // Low-latency speech held at the touch stays held, to carry on mid-word when resumed.
+      failoverTts.keepHeldSpeech();
     }
   }
 
@@ -2189,6 +2205,11 @@ public class SpeechControllerImpl implements SpeechController {
     if (!recordConfigurations.isEmpty()) {
       useAudioFocus = false;
     }
+    // An assistant such as Gemini stops its answer for good when it loses focus, even when it
+    // could duck, so speech plays alongside it instead.
+    if (useAudioFocus && isAssistantPlaying()) {
+      useAudioFocus = false;
+    }
 
     if (useAudioFocus) {
       LogUtils.v(TAG, "Request Audio Focus.");
@@ -2207,6 +2228,16 @@ public class SpeechControllerImpl implements SpeechController {
     mIsSpeaking = true;
   }
 
+  /** Returns whether an app is playing assistant audio, such as Gemini speaking an answer. */
+  private boolean isAssistantPlaying() {
+    for (AudioPlaybackConfiguration config : audioManager.getActivePlaybackConfigurations()) {
+      if (config.getAudioAttributes().getUsage() == AudioAttributes.USAGE_ASSISTANT) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Called when transitioning from a speaking state to an idle/pause state, e.g. all queued
    * utterances have been spoken, the last utterance has completed and {@link #pause()} is called
@@ -2215,6 +2246,18 @@ public class SpeechControllerImpl implements SpeechController {
    * @see #handleSpeechStarting()
    */
   private void handleSpeechCompleted(int status) {
+    if (!mIsSpeaking) {
+      // Speech already completed, such as when an interrupt completes the current item and the
+      // engine then reports that it stopped. Audio focus was released then, and observers told,
+      // except that a pause that stopped the speech is only known now.
+      if (status == STATUS_PAUSE) {
+        for (SpeechController.Observer observer : observers) {
+          observer.onSpeechPaused();
+        }
+      }
+      return;
+    }
+
     for (SpeechController.Observer observer : observers) {
       if (status == STATUS_PAUSE) {
         observer.onSpeechPaused();
@@ -2230,10 +2273,6 @@ public class SpeechControllerImpl implements SpeechController {
       } else {
         audioManager.abandonAudioFocus(mAudioFocusListener);
       }
-    }
-
-    if (!mIsSpeaking) {
-      LogUtils.e(TAG, "Completed speech while already completed!");
     }
 
     mIsSpeaking = false;

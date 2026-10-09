@@ -116,10 +116,7 @@ public class KeyComboManager
           .setQueueMode(SpeechController.QUEUE_MODE_INTERRUPT)
           .setFlags(
               FeedbackItem.FLAG_NO_HISTORY
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_PHONE_CALL_ACTIVE
+                  | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL
                   | FeedbackItem.FLAG_SKIP_DUPLICATE);
 
   /** Speak options for speech feedback that is uninterruptible by new speech. */
@@ -129,10 +126,7 @@ public class KeyComboManager
           .setQueueMode(SpeechController.QUEUE_MODE_UNINTERRUPTIBLE_BY_NEW_SPEECH)
           .setFlags(
               FeedbackItem.FLAG_NO_HISTORY
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE
-                  | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_PHONE_CALL_ACTIVE
+                  | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL
                   | FeedbackItem.FLAG_SKIP_DUPLICATE);
 
   /**
@@ -199,6 +193,13 @@ public class KeyComboManager
   private boolean matchKeyCombo = true;
   private boolean browseModeEnabled = false;
   private long browseModeEnabledTimeMills = 0;
+
+  /**
+   * Whether the user turned browse mode off in the web content that has focus. Smart browse mode
+   * then leaves it off, so that arrow keys keep going to the page, until the user turns it on or
+   * focus leaves the web content.
+   */
+  private boolean browseModeTurnedOffByUser = false;
   private boolean captureTrainingCombos = false;
   private KeyComboModel keyComboModel;
   private int serviceState = SERVICE_STATE_INACTIVE;
@@ -290,6 +291,7 @@ public class KeyComboManager
       analytics.onKeymapTypeUsed(keyComboModel);
       analytics.onModifierKeyUsed(keyComboModel.getTriggerModifier());
     }
+    browseModeTurnedOffByUser = false;
     if (browseModeEnabled) {
       browseModeEnabled = false;
       // Record a Browse Mode log if Browse Mode is on when TalkBack is being turned off.
@@ -506,8 +508,12 @@ public class KeyComboManager
     return isBrowseModeSupported() && browseModeEnabled;
   }
 
-  /** Sets whether browse mode is enabled. It creates an interruptive speech feedback. */
+  /**
+   * Sets whether browse mode is enabled, when the user turns it on or off. It creates an
+   * interruptive speech feedback.
+   */
   public void setBrowseModeEnabled(boolean enabled) {
+    browseModeTurnedOffByUser = !enabled;
     setBrowseModeEnabledInternal(enabled, /* makeSpeechFeedbackInterruptive= */ true);
   }
 
@@ -1276,7 +1282,14 @@ public class KeyComboManager
     // Smart browse mode turns on browse mode when an a11y focused node in a WebView. Do nothing if
     // the a11y focused node is not in a WebView or the a11y focused node falls into the conditions
     // to turn off browse mode.
-    if (!AccessibilityNodeInfoUtils.isSelfOrAncestorRoleWebView(sourceNode)
+    if (!AccessibilityNodeInfoUtils.isSelfOrAncestorRoleWebView(sourceNode)) {
+      // Focus left the web content, so the user's choice there no longer applies.
+      browseModeTurnedOffByUser = false;
+      return;
+    }
+    // The user turned browse mode off here, such as to use a control's arrow keys. Moving focus
+    // with those keys must not turn it back on.
+    if (browseModeTurnedOffByUser
         || KeyComboManagerHelper.shouldTurnOffBrowseMode(
             sourceNode, accessibilityFocusMonitor.getInputFocus())) {
       return;

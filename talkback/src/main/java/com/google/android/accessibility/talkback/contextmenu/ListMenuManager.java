@@ -27,6 +27,7 @@ import static com.google.android.accessibility.talkback.Feedback.Speech.Action.S
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CONTEXT;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CUSTOM_ACTION;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.LANGUAGE;
+import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.VOICE_PROFILE;
 import static com.google.android.accessibility.talkback.eventprocessor.EventState.EVENT_SKIP_FOCUS_SYNC_FROM_VIEW_FOCUSED;
 
 import android.content.Context;
@@ -128,6 +129,7 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
     CONTEXT,
     CUSTOM_ACTION,
     LANGUAGE,
+    VOICE_PROFILE,
   }
 
   public ListMenuManager(
@@ -242,9 +244,7 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
                   .setQueueMode(SpeechController.QUEUE_MODE_FLUSH_ALL)
                   .setFlags(
                       FeedbackItem.FLAG_NO_HISTORY
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE)));
+                          | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL)));
       return false;
     }
     if (menuId == CONTEXT) {
@@ -286,6 +286,9 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
       // Menu for language switcher
       LanguageMenuProcessor.prepareLanguageMenu(service, pipeline, actorState, menu);
       menu.setTitle(service.getString(R.string.language_options));
+    } else if (menuId == VOICE_PROFILE) {
+      VoiceProfileMenuProcessor.prepareVoiceProfileMenu(service, pipeline, menu);
+      menu.setTitle(service.getString(R.string.title_selector_voice_profile));
     }
   }
 

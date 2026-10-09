@@ -477,6 +477,11 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
         R.string.shortcut_value_toggle_voice_feedback, R.string.shortcut_toggle_voice_feedback),
     SHOW_LANGUAGE_OPTIONS(
         R.string.shortcut_value_show_language_options, R.string.shortcut_show_language_options),
+    VOICE_PROFILES(R.string.shortcut_value_voice_profiles, R.string.shortcut_voice_profiles),
+    PREVIOUS_VOICE_PROFILE(
+        R.string.shortcut_value_previous_voice_profile, R.string.shortcut_previous_voice_profile),
+    NEXT_VOICE_PROFILE(
+        R.string.shortcut_value_next_voice_profile, R.string.shortcut_next_voice_profile),
 
     // Menu control.
     TALKBACK_BREAKOUT(
@@ -919,6 +924,16 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
 
         // Skip multi-finger gestures when isMultiFingerOn = false.
         if (!isMultiFingerOn && gesture.gestureType == MULTI_FINGER) {
+          // Android 11 still sends the one-finger double tap gestures while the Actions reading
+          // control asks for them, so they need an action, but no gesture name or setting.
+          if (FeatureSupport.doesServiceHandleDoubleTap()
+              && (gesture == TalkBackGesture.ONE_FINGER_DOUBLE_TAP
+                  || gesture == TalkBackGesture.ONE_FINGER_DOUBLE_TAP_AND_HOLD)) {
+            String keyId = getPrefKeyWithGestureSet(context.getString(gesture.keyId), index);
+            gestureIdToActionKeyMap.put(
+                gesture.gestureId,
+                prefs.getString(keyId, context.getString(gesture.defaultActionId)));
+          }
           continue;
         }
 

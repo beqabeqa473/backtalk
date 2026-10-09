@@ -19,6 +19,7 @@ package com.google.android.accessibility.talkback.contextmenu;
 import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
 
 import android.content.SharedPreferences;
+import android.view.Menu;
 import android.view.MenuInflater;
 import androidx.annotation.BoolRes;
 import androidx.annotation.StringRes;
@@ -41,7 +42,10 @@ import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.SettingsUtils;
 import com.google.android.accessibility.utils.SharedPreferencesUtils;
 import com.google.android.accessibility.utils.monitor.ScreenMonitor;
+import com.google.android.accessibility.utils.output.FeedbackItem;
+import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import java.util.Arrays;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -79,6 +83,11 @@ public class TalkbackMenuProcessor {
   private static final int ORDER_NAVIGATION = 7;
   public static final int ORDER_TEXT_FORMATTING = 13;
   private static final int ORDER_LANGUAGES = 14;
+  private static final int ORDER_EMOJI = 15;
+  // Every order up to 27 is taken, so this shares Emoji's, as ORDER_SUMMARIZE_VIEW and
+  // ORDER_IMAGE_CAPTION share theirs. The menu keeps items with the same order in the order they're
+  // added, and the menu settings sort them by title, so Emoji is added first to match.
+  private static final int ORDER_VOICE_PROFILES = 15;
   private static final int ORDER_SHOW_HIDE_SCREEN = 20;
   private static final int ORDER_PAUSE_BACKTALK = 21;
   private static final int ORDER_SYSTEM_ACTIONS = 24;
@@ -161,6 +170,9 @@ public class TalkbackMenuProcessor {
     addTellingTimeActionMenu(menu, prefs);
     // Language
     addLanguageMenuIfValid(menu);
+    addEmojiMenuIfValid(menu);
+    // Voice profile
+    addVoiceProfileMenuIfValid(menu);
     // System Action
     addWindowActionMenu(menu);
     addScriptCommands(menu);
@@ -456,6 +468,75 @@ public class TalkbackMenuProcessor {
     }
   }
 
+  private void addVoiceProfileMenuIfValid(ContextMenu menu) {
+    menu.removeItem(R.id.voice_profile_menu);
+
+    if (!showMenuItem(
+        R.string.pref_show_context_menu_voice_profile_setting_key,
+        R.bool.pref_show_context_menu_voice_profile_default)) {
+      return;
+    }
+
+    ListSubMenu subMenu =
+        menu.addSubMenu(
+            /* groupId= */ 0,
+            /* itemId= */ R.id.voice_profile_menu,
+            ORDER_VOICE_PROFILES,
+            service.getString(R.string.title_selector_voice_profile));
+    // Shown only once there is a profile to choose besides Backtalk default.
+    if (!VoiceProfileMenuProcessor.prepareVoiceProfileSubMenu(service, pipeline, subMenu)) {
+      menu.removeItem(R.id.voice_profile_menu);
+    }
+  }
+
+  /** Adds a sub menu to choose how emoji are read, titled with the current choice. */
+  private void addEmojiMenuIfValid(ContextMenu menu) {
+    menu.removeItem(R.id.emoji_menu);
+    if (!showMenuItem(
+        R.string.pref_show_context_menu_emoji_setting_key,
+        R.bool.pref_show_context_menu_emoji_default)) {
+      return;
+    }
+    SharedPreferences prefs = SharedPreferencesUtils.getSharedPreferences(service);
+    String[] values = service.getResources().getStringArray(R.array.pref_emoji_speech_values);
+    String[] entries = service.getResources().getStringArray(R.array.pref_emoji_speech_entries);
+    String current =
+        SharedPreferencesUtils.getStringPref(
+            prefs,
+            service.getResources(),
+            R.string.pref_emoji_speech_key,
+            R.string.pref_emoji_speech_default);
+    int currentIndex = Math.max(0, Arrays.asList(values).indexOf(current));
+    ListSubMenu subMenu =
+        menu.addSubMenu(
+            /* groupId= */ 0,
+            /* itemId= */ R.id.emoji_menu,
+            ORDER_EMOJI,
+            service.getString(R.string.emoji_speech_state, entries[currentIndex]));
+    for (int i = 0; i < values.length; i++) {
+      String value = values[i];
+      String entry = entries[i];
+      ContextMenuItem item =
+          ContextMenu.createMenuItem(service, R.id.group_emoji, Menu.NONE, Menu.NONE, entry);
+      item.setOnMenuItemClickListener(
+          (OnContextMenuItemClickListener)
+              clicked -> {
+                SharedPreferencesUtils.putStringPref(
+                    prefs, service.getResources(), R.string.pref_emoji_speech_key, value);
+                pipeline.returnFeedback(
+                    EVENT_ID_UNTRACKED,
+                    Feedback.speech(
+                        service.getString(R.string.emoji_speech_state, entry),
+                        SpeakOptions.create()
+                            .setFlags(
+                                FeedbackItem.FLAG_NO_HISTORY
+                                    | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL)));
+                return true;
+              });
+      subMenu.add(item);
+    }
+  }
+
   private void addDimOrBrightenScreen(ContextMenu menu) {
     menu.removeItem(R.id.disable_dimming);
     menu.removeItem(R.id.enable_dimming);
@@ -495,8 +576,9 @@ public class TalkbackMenuProcessor {
     menu.removeItem(R.id.pause_backtalk);
 
     // A watch has no volume keys or keyboard to resume with, and the paused notification needs a
-    // permission watches rarely grant, so pausing could leave the user without a screen reader.
-    if (FormFactorUtils.isAndroidWear()) {
+    // permission watches rarely grant, so pausing could leave the user without a screen reader. On
+    // a TV, the volume keys often go to the TV or a soundbar, and there is no notification shade.
+    if (FormFactorUtils.isAndroidWear() || FormFactorUtils.isAndroidTv()) {
       return;
     }
     if (!showMenuItem(

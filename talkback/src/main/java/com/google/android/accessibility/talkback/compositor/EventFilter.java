@@ -29,6 +29,7 @@ import android.view.accessibility.AccessibilityWindowInfo;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.talkback.compositor.rule.EventTypeViewAccessibilityFocusedFeedbackRule;
 import com.google.android.accessibility.talkback.flags.FeatureFlagReader;
+import com.google.android.accessibility.talkback.focusmanagement.TraversalTreeCache;
 import com.google.android.accessibility.talkback.focusmanagement.record.FocusActionInfo;
 import com.google.android.accessibility.utils.AccessibilityEventUtils;
 import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
@@ -87,6 +88,12 @@ public class EventFilter {
    * the app's focus event has been handled, and usually before the next swipe starts.
    */
   private static final long PREPARE_DELAY_MS = 30;
+
+  /**
+   * Whether a swipe's target that is only partly on screen is spoken before the swipe has scrolled
+   * it into view, rather than from the app's focus event after it has, as TalkBack does.
+   */
+  private static volatile boolean speakItemsBeforeScroll = false;
 
   /** The directions of the swipes whose targets are prepared: to the next and previous node. */
   private static final int[] SWIPE_DIRECTIONS = {
@@ -300,6 +307,11 @@ public class EventFilter {
       node = prepared.getNode();
       preparedFeedback = prepared.getFeedback();
       preparedContainerTitle = prepared.getContainerTitle();
+    } else if (TraversalTreeCache.holdsCurrent(focusedNode)) {
+      // Read from the app with the saved order, and nothing in its window has changed since, so a
+      // second read would only wait for the app, which on a watch is often busy scrolling.
+      node = focusedNode;
+      preparedFeedback = null;
     } else {
       // The node may come from the saved reading order, which keeps nodes for a while after their
       // text or state changes, such as a progress label or a switch the app turned on. Read it
@@ -333,7 +345,7 @@ public class EventFilter {
         EventTypeViewAccessibilityFocusedFeedbackRule.currentContainerTitle =
             preparedContainerTitle;
       } else {
-        feedback = compositor.getFeedback(event, node, eventInterpreted);
+        feedback = getSwipeTargetFeedback(event, node, eventInterpreted);
       }
       if (!hasSpeech(feedback)) {
         // Some nodes only show their content once focused, such as the second notification of a
@@ -355,6 +367,25 @@ public class EventFilter {
     earlyFocusSpeech.addSpoken(node, actionTime);
     onFocusMoved(node);
     return true;
+  }
+
+  /** Sets whether items are spoken before a swipe scrolls them into view; see the field. */
+  public static void setSpeakItemsBeforeScroll(boolean speak) {
+    speakItemsBeforeScroll = speak;
+  }
+
+  /**
+   * Works out what focusing {@code node} by a swipe says. This comes before the swipe has scrolled
+   * the node into view, so its children still off screen are described as they will be once it has.
+   */
+  private EventFeedback getSwipeTargetFeedback(
+      AccessibilityEvent event, AccessibilityNodeInfoCompat node, EventInterpretation interpreted) {
+    globalVariables.setDescribingSwipeTarget(speakItemsBeforeScroll);
+    try {
+      return compositor.getFeedback(event, node, interpreted);
+    } finally {
+      globalVariables.setDescribingSwipeTarget(false);
+    }
   }
 
   /** The interpretation of the focus event for focus that user navigation set with {@code info}. */
@@ -398,8 +429,25 @@ public class EventFilter {
       return false;
     }
     AccessibilityWindowInfo window = AccessibilityNodeInfoUtils.getWindow(node.unwrap());
-    return AccessibilityWindowInfoUtils.getType(window)
-        != AccessibilityWindowInfo.TYPE_INPUT_METHOD;
+    if (AccessibilityWindowInfoUtils.getType(window)
+        == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+      return false;
+    }
+    // An item only partly on screen, which the swipe is about to scroll into view, can have all
+    // its text in children still off screen, which descriptions leave out unless they are spoken
+    // as they will be after the scroll. Otherwise the app's event, after the scroll, says it.
+    return speakItemsBeforeScroll || !hasChildOffScreen(node);
+  }
+
+  /** Whether a child of {@code node} is off screen. */
+  private static boolean hasChildOffScreen(AccessibilityNodeInfoCompat node) {
+    for (int i = 0; i < node.getChildCount(); i++) {
+      AccessibilityNodeInfoCompat child = node.getChild(i);
+      if (child != null && !child.isVisibleToUser()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Prepares the announcements of the nodes next to {@code node}, which focus just moved to. */
@@ -459,7 +507,7 @@ public class EventFilter {
     try {
       globalVariables.updateStateFromFocusedNode(node);
       globalVariables.updateCollectionStateFromFocusedNode(node, event);
-      feedback = compositor.getFeedback(event, node, focusInterpretation(info));
+      feedback = getSwipeTargetFeedback(event, node, focusInterpretation(info));
       containerTitle = EventTypeViewAccessibilityFocusedFeedbackRule.currentContainerTitle;
     } catch (RuntimeException e) {
       LogUtils.e(TAG, "Cannot prepare focus speech: %s", e);

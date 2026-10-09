@@ -28,6 +28,8 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.media.AudioManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
@@ -53,7 +55,7 @@ import com.google.android.accessibility.utils.StringBuilderUtils;
 import com.google.android.accessibility.utils.broadcast.SameThreadBroadcastReceiver;
 import com.google.android.accessibility.utils.monitor.DisplayMonitor;
 import com.google.android.accessibility.utils.monitor.DisplayMonitor.DisplayStateChangedListener;
-import com.google.android.accessibility.utils.output.FeedbackController;
+import com.google.android.accessibility.utils.output.FailoverTextToSpeech;
 import com.google.android.accessibility.utils.output.FeedbackItem;
 import com.google.android.accessibility.utils.output.SpeechController;
 import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions;
@@ -119,6 +121,7 @@ public class RingerModeAndScreenMonitor extends SameThreadBroadcastReceiver
   private boolean monitoring = false;
 
   private final ExecutorService executor;
+  private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
   @Override
   public void onDisplayStateChanged(boolean displayOn) {
@@ -299,16 +302,9 @@ public class RingerModeAndScreenMonitor extends SameThreadBroadcastReceiver
       appendRingerStateAnnouncement(ttsText);
     }
 
-    // Always reset the television remote mode to the standard (navigate) mode on screen off.
-    if (televisionNavigationController != null) {
-      televisionNavigationController.resetToNavigateMode();
-    }
-
-    // Stop queued speech and events. AccessibilityEventProcessor will block new events.
-    service.clearQueues();
-
     // Speak "screen off".
     // REFERTO: Do not have any screen off message and any chime for Android Wear.
+    Feedback.Part.@Nullable Builder feedback = null;
     if (!isWatch) {
       // Uninterruptible, so that the lock screen or always-on display appearing right after the
       // screen turns off does not cut the announcement off.
@@ -318,8 +314,9 @@ public class RingerModeAndScreenMonitor extends SameThreadBroadcastReceiver
               .setFlags(FeedbackItem.FLAG_NO_HISTORY);
       final float volume;
       if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-        // Gets TalkBack's default earcon volume from FeedbackController.
-        final float talkbackVolume = getStreamVolume(FeedbackController.DEFAULT_STREAM);
+        // Gets the volume of Backtalk's sounds, which use the speech volume.
+        final float talkbackVolume =
+            getStreamVolume(FailoverTextToSpeech.getSpeechAudioStream(service));
         if ((talkbackVolume > 0)
             && (audioManager.isWiredHeadsetOn() || audioManager.isBluetoothA2dpOn())) {
           // TODO: refactor the following lines.
@@ -333,16 +330,35 @@ public class RingerModeAndScreenMonitor extends SameThreadBroadcastReceiver
           volume = 1.0f;
         }
         // Normally we'll play the volume beep on the ring stream.
-        Feedback.Part.Builder feedback =
-            Feedback.part().setSound(Feedback.Sound.create(R.raw.screen_off, 1.0f, volume));
+        feedback = Feedback.part().setSound(Feedback.Sound.create(R.raw.screen_off, 1.0f, volume));
         if (ttsText.length() > 0) {
           feedback.speech(ttsText, speakOptions);
         }
-        pipeline.returnFeedback(eventId, feedback);
       } else if (ttsText.length() > 0) {
-        pipeline.returnFeedback(eventId, Feedback.speech(ttsText, speakOptions));
+        feedback = Feedback.speech(ttsText, speakOptions);
       }
     }
+
+    // The rest uses the speech queue and the event queues, which only the main thread may use.
+    final Feedback.Part.@Nullable Builder screenOffFeedback = feedback;
+    mainHandler.post(
+        () -> {
+          if (isInteractive) {
+            // The screen came back on meanwhile, so it is too late to say it went off.
+            return;
+          }
+          // Always reset the television remote mode to the standard (navigate) mode on screen off.
+          if (televisionNavigationController != null) {
+            televisionNavigationController.resetToNavigateMode();
+          }
+
+          // Stop queued speech and events. AccessibilityEventProcessor will block new events.
+          service.clearQueues();
+
+          if (screenOffFeedback != null) {
+            pipeline.returnFeedback(eventId, screenOffFeedback);
+          }
+        });
   }
 
   /** Handles when the screen is turned off. Announces "screen off". */
