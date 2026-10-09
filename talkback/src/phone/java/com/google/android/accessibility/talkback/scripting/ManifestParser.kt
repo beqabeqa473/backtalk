@@ -173,6 +173,10 @@ class ManifestParser(private val strict: Boolean) {
 
   private fun query(json: JSONObject): NodeQuery {
     json.allowOnly(NodeQuery.KEYS, "match")
+    manifestCheck(!json.has("inside") || json.opt("inside") is JSONObject) {
+      "inside is an object, like match"
+    }
+    json.optJSONObject("inside")?.let(::query)
     val query = NodeQuery.of(json)
     manifestCheck(query != NodeQuery()) { "A match needs at least one field" }
     checkRole(query.role)

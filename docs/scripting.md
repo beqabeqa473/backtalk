@@ -166,6 +166,7 @@ A query finds items. It's an id as text, or an object with any of these; an item
 | `role` | The role the app gave the item. |
 | `clickable` | `true` or `false`. |
 | `parentId` | The view id of the item's parent. |
+| `inside` | A query that one of the items around it must match: its parent, the parent's parent, and so on. `{ className: 'Button', inside: { textContains: 'play video' } }` matches every button in a video's row, and not the row itself. |
 
 ## Items
 

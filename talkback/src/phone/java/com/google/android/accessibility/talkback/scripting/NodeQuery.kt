@@ -31,6 +31,7 @@ data class NodeQuery(
   val role: String? = null,
   val clickable: Boolean? = null,
   val parentId: String? = null,
+  val inside: NodeQuery? = null,
 ) {
   fun matches(node: AccessibilityNodeInfoCompat, textOf: TextOf = PLAIN_TEXT): Boolean =
     (id == null || idMatches(id, node.viewIdResourceName)) &&
@@ -40,7 +41,9 @@ data class NodeQuery(
       (text == null || textOf(node) == text) &&
       (textContains == null || contains(node, textOf, textContains)) &&
       (role == null || ScriptRoles.appRole(node) == role) &&
-      (parentId == null || idMatches(parentId, node.parent?.viewIdResourceName))
+      (parentId == null || idMatches(parentId, node.parent?.viewIdResourceName)) &&
+      // Last, because every ancestor is a call to the app.
+      (inside == null || node.ancestors().any { inside.matches(it, textOf) })
 
   /**
    * Finds items under [root], and stops early at [deadline], a [SystemClock.uptimeMillis] time.
@@ -87,6 +90,7 @@ data class NodeQuery(
         "role",
         "clickable",
         "parentId",
+        "inside",
       )
 
     fun of(json: JSONObject): NodeQuery {
@@ -100,6 +104,7 @@ data class NodeQuery(
         role = text("role"),
         clickable = if (json.has("clickable")) json.getBoolean("clickable") else null,
         parentId = text("parentId"),
+        inside = json.optJSONObject("inside")?.let(::of),
       )
     }
 
