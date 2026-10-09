@@ -51,7 +51,9 @@ class ScriptPackage(val files: Map<String, ByteArray>, val manifest: ScriptManif
             "The zip has a file outside it: $name"
           }
           if (name.startsWith("__MACOSX/") || name.substringAfterLast('/').startsWith(".")) continue
-          val content = zip.readBytes()
+          // Stops reading as soon as the files would be too large together. A small zip can hold
+          // gigabytes, and this runs in the screen reader's own process.
+          val content = zip.readAtMost((MAX_BYTES - total + 1).toInt())
           total += content.size
           manifestCheck(entries.size < MAX_FILES && total <= MAX_BYTES) {
             "The zip has too many or too large files"

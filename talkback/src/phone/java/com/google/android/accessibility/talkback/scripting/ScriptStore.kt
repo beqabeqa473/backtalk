@@ -69,6 +69,17 @@ class ScriptStore private constructor(private val context: Context) {
 
   @Synchronized fun find(id: String): InstalledScript? = all().firstOrNull { it.id == id }
 
+  @Synchronized fun anyEnabled(): Boolean = scripts.any { it.enabled }
+
+  /** Turns every script off without changing which ones are switched on. */
+  var allOff: Boolean
+    get() = index.getBoolean(KEY_ALL_OFF, false)
+    set(value) {
+      if (value == allOff) return
+      index.edit { putBoolean(KEY_ALL_OFF, value) }
+      notify { it.onScriptsChanged() }
+    }
+
   fun translations(id: String): ScriptTranslations =
     ScriptTranslations.load(ScriptTranslations.languageOf(context)) { readFile(id, it) }
 
@@ -85,9 +96,21 @@ class ScriptStore private constructor(private val context: Context) {
       file.parentFile?.mkdirs()
       file.writeBytes(bytes)
     }
-    if (!staging.renameTo(codeDir(id).apply { deleteRecursively() })) {
+    // The old code is moved aside until the new code is in place, so a failed install leaves the
+    // script as it was rather than listed with no code.
+    val code = codeDir(id)
+    val old = File(scriptsDir(), ".$id.old").apply { deleteRecursively() }
+    val replaces = code.exists()
+    if (replaces && !code.renameTo(old)) {
+      staging.deleteRecursively()
+      throw IOException("Could not replace $id")
+    }
+    if (!staging.renameTo(code)) {
+      if (replaces) old.renameTo(code)
+      staging.deleteRecursively()
       throw IOException("Could not install $id")
     }
+    old.deleteRecursively()
     updateScripts { list ->
       val existing = list.firstOrNull { it.id == id }
       val installed =
@@ -210,16 +233,9 @@ class ScriptStore private constructor(private val context: Context) {
     command.bindings.forEach { remove(bindingKey(command.id, it)) }
   }
 
-  fun installBuiltInExampleOnce() {
-    if (index.getBoolean(KEY_EXAMPLE_INSTALLED, false)) return
-    index.edit { putBoolean(KEY_EXAMPLE_INSTALLED, true) }
-    try {
-      val pkg = ScriptPackage.read(context.assets.open(EXAMPLE_ASSET).use { it.readBytes() })
-      if (find(pkg.manifest.id) == null) install(pkg, pkg.manifest.permissions, enabled = false)
-    } catch (e: Exception) {
-      LogUtils.e(TAG, "Could not install the example plugin: %s", e)
-    }
-  }
+  /** The example script that comes with Backtalk, for the Scripts screen to offer. */
+  @Throws(IOException::class)
+  fun exampleBytes(): ByteArray = context.assets.open(EXAMPLE_ASSET).use { it.readBytes() }
 
   private fun keys(id: String, key: String): List<String> =
     dataPrefs(id).getString(key, null)?.let { JSONArray(it).strings() }.orEmpty()
@@ -311,7 +327,8 @@ class ScriptStore private constructor(private val context: Context) {
     private const val TAG = "ScriptStore"
     private const val INDEX_PREFS = "backtalk_scripts"
     private const val KEY_INDEX = "index"
-    private const val KEY_EXAMPLE_INSTALLED = "example_installed"
+    private const val KEY_ALL_OFF = "all_off"
+    const val EXAMPLE_ID = "example-plugin"
     private const val EXAMPLE_ASSET = "scripting/example-plugin.js"
     private const val STORAGE = "storage/"
     private const val SETTING = "setting/"

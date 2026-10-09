@@ -18,10 +18,7 @@ Backtalk speaks sooner after each swipe and screen change, and can play its soun
 
 The emoji names are from the [Unicode CLDR](https://cldr.unicode.org/) and the Unicode emoji data, copyright Unicode, Inc., used under the Unicode License v3, which is in `utils/src/main/assets/emoji_names/LICENSE`.
 
-### Scripts
-
-*   **JavaScript scripts and plugins.** Like NVDA's app modules, scripts change how Backtalk works in one app, or in every app as global plugins. A script can give unlabeled buttons names, hide clutter, change or silence what Backtalk says for an item, read the screen, press buttons, speak, play sounds and vibrate, add gestures, keyboard shortcuts, Backtalk menu items and reading controls, filter everything Backtalk says, react to notifications, typing and screen changes, use the internet and the clipboard, and keep its own data and settings. To install one, go to **Advanced settings > Scripts** in Backtalk settings and choose **Import script**. Backtalk lists what the script asks to do before it installs it. Each script has a page with an on and off switch, a switch for each permission and for each gesture, key, menu item and reading control it adds, its settings on their own screen, its log, and **Remove**. While a script runs, its gestures and keys come before Backtalk's. Scripts run on the phone only. [Writing Backtalk scripts](docs/scripting.md) has the whole API, and [docs/scripting/examples](docs/scripting/examples) has scripts to start from. An example plugin comes installed and turned off.
-*   **Inspect focused item.** This says the focused item's id, class, role, app, activity and window, and copies them, so that scripts can name it. Assign it to a gesture in gesture settings, or add it to the Backtalk menu in **Customize menus > Backtalk menu**.
+Scripts run in [QuickJS-NG](https://github.com/quickjs-ng/quickjs), copyright Fabrice Bellard, Charlie Gordon, Ben Noordhuis and Saúl Ibarra Corretgé, used under the MIT License, which is in `scripting/quickjs/src/main/assets/quickjs/LICENSE`. The build downloads its source, pinned by version and checksum in `scripting/quickjs/src/main/cpp/CMakeLists.txt`.
 
 ## Build
 

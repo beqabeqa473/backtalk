@@ -1081,14 +1081,14 @@ public class TalkBackService extends AccessibilityServiceCompat
 
   @Override
   public void onAccessibilityEvent(AccessibilityEvent event) {
-    if (scriptHost != null) {
-      scriptHost.onAccessibilityEvent(event);
-    }
     // Paused Backtalk drops events, except the end of a touch that started before the pause, so
     // that nothing still thinks a finger is down after resuming. Its feedback is dropped too.
     if (PauseController.isPaused()
         && event.getEventType() != AccessibilityEvent.TYPE_TOUCH_INTERACTION_END) {
       return;
+    }
+    if (scriptHost != null) {
+      scriptHost.onAccessibilityEvent(event);
     }
     if (audioDeviceRouter != null) {
       audioDeviceRouter.ensureRouting();

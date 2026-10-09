@@ -46,8 +46,8 @@ import com.google.android.accessibility.utils.output.FeedbackItem;
 import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
 import java.util.Arrays;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Configure dynamic menu items on the talkback context menu. */
@@ -183,7 +183,7 @@ public class TalkbackMenuProcessor {
         R.string.pref_show_context_menu_inspect_item_setting_key,
         R.bool.pref_show_context_menu_inspect_item_default,
         R.string.shortcut_inspect_item,
-        node -> ItemInspector.inspect(service, node));
+        (node, say) -> say.accept(ItemInspector.inspect(service, node)));
     addScriptTool(
         menu,
         R.id.copy_screen_tree,
@@ -191,7 +191,7 @@ public class TalkbackMenuProcessor {
         R.string.pref_show_context_menu_copy_screen_tree_setting_key,
         R.bool.pref_show_context_menu_copy_screen_tree_default,
         R.string.shortcut_copy_screen_tree,
-        node -> ItemInspector.copyScreenTree(service, node));
+        (node, say) -> ItemInspector.copyScreenTree(service, node, say));
 
     setMenuItemShowsDialog(
         menu,
@@ -662,7 +662,7 @@ public class TalkbackMenuProcessor {
       @StringRes int showKey,
       @BoolRes int showDefault,
       @StringRes int title,
-      Function<@Nullable AccessibilityNodeInfoCompat, String> tool) {
+      BiConsumer<@Nullable AccessibilityNodeInfoCompat, Consumer<String>> tool) {
     menu.removeItem(itemId);
     if (showMenuItem(showKey, showDefault)) {
       addAfterMenuCloses(
@@ -670,7 +670,11 @@ public class TalkbackMenuProcessor {
           itemId,
           order,
           service.getString(title),
-          node -> pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(tool.apply(node))));
+          node ->
+              tool.accept(
+                  node,
+                  message ->
+                      pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(message))));
     }
   }
 

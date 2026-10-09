@@ -46,6 +46,7 @@ import com.google.android.libraries.accessibility.utils.log.LogUtils
 import java.io.File
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
 class ScriptFeedback(
@@ -54,6 +55,9 @@ class ScriptFeedback(
   private val resumeBacktalk: Runnable,
 ) {
   private val mainHandler = Handler(Looper.getMainLooper())
+  // Sounds scripts are playing now. Android gives an app only so many audio tracks, and Backtalk's
+  // own sounds come out of the same allowance.
+  private val playing = AtomicInteger()
 
   @Volatile var paused = false
 
@@ -74,32 +78,52 @@ class ScriptFeedback(
   }
 
   fun playAudio(samples: FloatArray, sampleRate: Int, volume: Float) {
-    if (!soundOn()) return
+    if (!soundOn() || !startPlaying()) return
     val pcm =
       ShortArray(samples.size) {
         (samples[it].coerceIn(-1f, 1f) * volume * Short.MAX_VALUE).roundToInt().toShort()
       }
     val track =
-      AudioTrack.Builder()
-        .setAudioAttributes(SONIFICATION)
-        .setAudioFormat(
-          AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(sampleRate)
-            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-            .build()
-        )
-        .setTransferMode(AudioTrack.MODE_STATIC)
-        .setBufferSizeInBytes(pcm.size * 2)
-        .build()
+      try {
+        AudioTrack.Builder()
+          .setAudioAttributes(SONIFICATION)
+          .setAudioFormat(
+            AudioFormat.Builder()
+              .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+              .setSampleRate(sampleRate)
+              .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+              .build()
+          )
+          .setTransferMode(AudioTrack.MODE_STATIC)
+          .setBufferSizeInBytes(pcm.size * 2)
+          .build()
+      } catch (e: RuntimeException) {
+        LogUtils.e(TAG, "Could not play script audio: %s", e)
+        playing.decrementAndGet()
+        return
+      }
+    val release = {
+      track.release()
+      playing.decrementAndGet()
+    }
     try {
       track.write(pcm, 0, pcm.size)
       track.play()
-      mainHandler.postDelayed(track::release, pcm.size * 1000L / sampleRate + RELEASE_DELAY_MS)
+      mainHandler.postDelayed(
+        { release() },
+        pcm.size * 1000L / sampleRate + RELEASE_DELAY_MS,
+      )
     } catch (e: IllegalStateException) {
       LogUtils.e(TAG, "Could not play script audio: %s", e)
-      track.release()
+      release()
     }
+  }
+
+  private fun startPlaying(): Boolean {
+    if (playing.incrementAndGet() <= MAX_PLAYING) return true
+    playing.decrementAndGet()
+    LogUtils.w(TAG, "Skipped a script sound, %d are already playing", MAX_PLAYING)
+    return false
   }
 
   fun playSound(resId: Int): Boolean {
@@ -108,12 +132,17 @@ class ScriptFeedback(
   }
 
   fun playFile(file: File, done: (Boolean) -> Unit) {
-    if (!soundOn()) return done(false)
+    if (!soundOn() || !startPlaying()) return done(false)
     onMain {
       val player = MediaPlayer()
+      var finished = false
       val finish = { played: Boolean ->
-        player.release()
-        done(played)
+        if (!finished) {
+          finished = true
+          player.release()
+          playing.decrementAndGet()
+          done(played)
+        }
       }
       player.setAudioAttributes(SONIFICATION)
       player.setOnCompletionListener { finish(true) }
@@ -123,6 +152,11 @@ class ScriptFeedback(
         player.prepare()
         player.start()
       } catch (e: IOException) {
+        LogUtils.e(TAG, "Could not play %s: %s", file.name, e)
+        finish(false)
+      } catch (e: RuntimeException) {
+        // MediaPlayer also throws IllegalStateException and IllegalArgumentException, and this is
+        // the main thread.
         LogUtils.e(TAG, "Could not play %s: %s", file.name, e)
         finish(false)
       }
@@ -187,6 +221,7 @@ class ScriptFeedback(
   private companion object {
     const val TAG = "ScriptFeedback"
     const val RELEASE_DELAY_MS = 200L
+    const val MAX_PLAYING = 4
     val SONIFICATION: AudioAttributes =
       AudioAttributes.Builder()
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)

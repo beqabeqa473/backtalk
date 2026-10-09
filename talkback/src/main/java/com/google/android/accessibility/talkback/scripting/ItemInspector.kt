@@ -20,9 +20,13 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import com.google.android.accessibility.talkback.R
 import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils
+import java.util.concurrent.Executors
+import java.util.function.Consumer
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,8 +54,25 @@ object ItemInspector {
     return context.getString(message ?: R.string.script_inspect_no_id, details)
   }
 
+  /**
+   * Copies every item on screen as JSON, then gives [done] what to say. Reading the screen asks the
+   * app about each item in turn, so it happens off the main thread.
+   */
   @JvmStatic
-  fun copyScreenTree(context: Context, node: AccessibilityNodeInfoCompat?): String {
+  fun copyScreenTree(context: Context, node: AccessibilityNodeInfoCompat?, done: Consumer<String>) {
+    val main = Handler(Looper.getMainLooper())
+    treeReader.execute {
+      val message =
+        try {
+          readScreenTree(context, node)
+        } catch (e: RuntimeException) {
+          context.getString(R.string.script_tree_none)
+        }
+      main.post { done.accept(message) }
+    }
+  }
+
+  private fun readScreenTree(context: Context, node: AccessibilityNodeInfoCompat?): String {
     val activeRoot = (context as? AccessibilityService)?.rootInActiveWindow
     val root =
       node?.let(AccessibilityNodeInfoUtils::getRoot)
@@ -90,6 +111,7 @@ object ItemInspector {
     if (values.isNotEmpty()) put(key, JSONArray(values))
   }
 
+  private val treeReader by lazy { Executors.newSingleThreadExecutor() }
   private const val MAX_DEPTH = 60
   private const val MAX_ITEMS = 2000
 

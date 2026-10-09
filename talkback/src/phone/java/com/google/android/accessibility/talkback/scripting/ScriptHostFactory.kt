@@ -18,7 +18,6 @@ package com.google.android.accessibility.talkback.scripting
 
 import android.accessibilityservice.AccessibilityService
 import com.google.android.accessibility.talkback.Pipeline
-import com.google.android.libraries.accessibility.utils.log.LogUtils
 
 object ScriptHostFactory {
   @JvmStatic
@@ -26,12 +25,5 @@ object ScriptHostFactory {
     service: AccessibilityService,
     feedback: Pipeline.FeedbackReturner,
     resume: Runnable,
-  ): ScriptHost? =
-    try {
-      System.loadLibrary("backtalkquickjs")
-      ScriptManager(service, ScriptFeedback(service, feedback, resume))
-    } catch (e: UnsatisfiedLinkError) {
-      LogUtils.e("ScriptHostFactory", "Scripts are unavailable: %s", e)
-      null
-    }
+  ): ScriptHost? = LazyScriptHost(service, feedback, resume)
 }

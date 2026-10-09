@@ -61,10 +61,15 @@ class ScriptItemActions(private val handler: Handler, private val feedback: Scri
       .filter { (runtime, action) ->
         action.permission?.let { runtime.allowed(it, "The action ${action.title}") } != false
       }
-      .map { (runtime, action) -> ScriptItemAction(action.title) { run(runtime, action, node) } }
+      .map { (runtime, action) ->
+        @Suppress("DEPRECATION") val copy = AccessibilityNodeInfoCompat.obtain(node)
+        // Finding the action's target can visit every item on screen.
+        ScriptItemAction(action.title) { handler.post { run(runtime, action, copy) } }
+      }
 
   private fun fromScripts(node: AccessibilityNodeInfoCompat): List<ScriptItemAction> {
     val chain = scripts.ifEmpty { return emptyList() }
+    if (ScriptThread.heldUpFor(WAIT_MS)) return emptyList()
     @Suppress("DEPRECATION") val copy = AccessibilityNodeInfoCompat.obtain(node)
     return handler
       .await(WAIT_MS, HOOK) { chain.filter { it.isLoaded }.flatMap { offer(it, copy) } }
@@ -105,13 +110,17 @@ class ScriptItemActions(private val handler: Handler, private val feedback: Scri
     feedback.playSound(R.raw.complete)
   }
 
-  private fun find(node: AccessibilityNodeInfoCompat, query: NodeQuery) =
-    query.firstIn(node) ?: AccessibilityNodeInfoUtils.getRoot(node)?.let(query::firstIn)
+  private fun find(node: AccessibilityNodeInfoCompat, query: NodeQuery): AccessibilityNodeInfoCompat? {
+    val deadline = SystemClock.uptimeMillis() + FIND_LIMIT_MS
+    return query.firstIn(node, deadline)
+      ?: AccessibilityNodeInfoUtils.getRoot(node)?.let { query.firstIn(it, deadline) }
+  }
 
   private companion object {
     const val HOOK = "actions"
     const val WAIT_MS = 50L
     const val LIMIT_MS = 250L
     const val REUSE_MS = 1000L
+    const val FIND_LIMIT_MS = 1000L
   }
 }

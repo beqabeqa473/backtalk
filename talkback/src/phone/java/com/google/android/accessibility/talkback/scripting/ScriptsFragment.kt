@@ -31,11 +31,26 @@ class ScriptsFragment : ScriptScreenFragment() {
 
   public override fun getTitle(): CharSequence = getText(R.string.title_pref_scripts)
 
-  override fun state(): Any = store.all()
+  override fun state(): Any = store.all() to store.allOff
 
   override fun build(screen: PreferenceScreen) {
+    screen.switch(
+      getString(R.string.scripts_all_off),
+      getString(R.string.scripts_all_off_summary),
+      store.allOff,
+    ) {
+      store.allOff = it
+    }
     screen.action(getString(R.string.script_import), getString(R.string.script_import_summary)) {
       openScript.launch(arrayOf("*/*"))
+    }
+    if (store.find(ScriptStore.EXAMPLE_ID) == null) {
+      screen.action(
+        getString(R.string.script_add_example),
+        getString(R.string.script_add_example_summary),
+      ) {
+        read { store.exampleBytes() }
+      }
     }
     val (global, app) = store.all().partition { it.manifest.isGlobal }
     if (global.isEmpty() && app.isEmpty()) screen.info(getString(R.string.scripts_none))
@@ -56,13 +71,15 @@ class ScriptsFragment : ScriptScreenFragment() {
 
   private fun importScript(uri: Uri) {
     val resolver = requireContext().contentResolver
+    read {
+      resolver.openInputStream(uri)?.use { it.readAtMost(ScriptPackage.MAX_BYTES + 1) }
+        ?: throw IOException("The file could not be opened")
+    }
+  }
+
+  private fun read(bytes: () -> ByteArray) {
     executor.execute {
-      val result = runCatching {
-        val bytes =
-          resolver.openInputStream(uri)?.use { it.readAtMost(ScriptPackage.MAX_BYTES + 1) }
-            ?: throw IOException("The file could not be opened")
-        ScriptPackage.read(bytes)
-      }
+      val result = runCatching { ScriptPackage.read(bytes()) }
       view?.post {
         if (isAdded) result.fold(::confirmInstall) { importFailed(it.message) }
       }
@@ -82,7 +99,6 @@ class ScriptsFragment : ScriptScreenFragment() {
     val done =
       if (isNew) getString(R.string.script_installed, manifest.name)
       else getString(R.string.script_updated, manifest.name, manifest.version)
-    if (!isNew && added.isEmpty() && warning == null) return install(pkg, granted, done)
     val title =
       if (isNew) getString(R.string.script_install_title, manifest.name)
       else getString(R.string.script_update_title, manifest.name, manifest.version)
@@ -93,7 +109,9 @@ class ScriptsFragment : ScriptScreenFragment() {
         warning == null -> R.string.script_update_button
         else -> R.string.script_update_anyway
       }
-    val message = if (isNew) installMessage(manifest, warning) else updateMessage(added, warning)
+    val message =
+      if (existing == null) installMessage(manifest, warning)
+      else updateMessage(existing.manifest, manifest, added, warning)
     confirm(title, message, button) { install(pkg, granted, done) }
   }
 
@@ -118,9 +136,19 @@ class ScriptsFragment : ScriptScreenFragment() {
       .joinToString("\n\n")
   }
 
-  private fun updateMessage(added: Set<ScriptPermission>, warning: String?): String =
+  // An update always asks first. A file only has to carry an installed script's id to replace it,
+  // whoever wrote it, and it then has that script's permissions, data and settings.
+  private fun updateMessage(
+    installed: ScriptManifest,
+    manifest: ScriptManifest,
+    added: Set<ScriptPermission>,
+    warning: String?,
+  ): String =
     listOfNotNull(
         warning,
+        getString(R.string.script_update_replaces, installed.version, installed.author),
+        getString(R.string.script_update_other_author, manifest.author)
+          .takeIf { manifest.author != installed.author },
         added
           .takeIf { it.isNotEmpty() }
           ?.let {

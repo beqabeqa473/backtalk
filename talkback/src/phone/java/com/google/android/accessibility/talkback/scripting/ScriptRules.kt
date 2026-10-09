@@ -23,6 +23,7 @@ class ScriptRules
 private constructor(
   entries: List<Entry>,
   actionEntries: List<Entry>,
+  private val ownPackage: String?,
   private val front: () -> Pair<String?, String?>,
 ) {
   class Entry(
@@ -45,6 +46,14 @@ private constructor(
       override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, NodeRule?>) =
         size > CACHE_SIZE
     }
+  // Whether an ancestor hides the item. Finding out asks the app for each ancestor in turn, and
+  // Backtalk asks about every item it considers for focus.
+  private val hiddenInsideCache =
+    object : LinkedHashMap<AccessibilityNodeInfoCompat, Boolean>(CACHE_SIZE, 0.75f, true) {
+      override fun removeEldestEntry(
+        eldest: MutableMap.MutableEntry<AccessibilityNodeInfoCompat, Boolean>
+      ) = size > CACHE_SIZE
+    }
   private val aspects: Set<RuleAspect> =
     entries.flatMapTo(mutableSetOf(RuleAspect.ANY)) { aspectsOf(it.rule) }
 
@@ -61,7 +70,8 @@ private constructor(
         return cache[key]
       }
     }
-    val resolved = merge(changes.matching(node))
+    val matching = changes.matching(node)
+    val resolved = mergeRules(matching.map { it.rule }, matching.map { it.source })
     synchronized(cache) { cache[key] = resolved }
     return resolved
   }
@@ -70,12 +80,18 @@ private constructor(
     withActions.matching(node).flatMap { entry -> entry.rule.actions.map { entry.runtime to it } }
 
   fun isHidden(node: AccessibilityNodeInfoCompat): Boolean =
-    hidesAny &&
-      (resolve(node)?.hide == true ||
-        hidesInside && node.ancestors().any { resolve(it)?.hidesDescendants == true })
+    hidesAny && (resolve(node)?.hide == true || hidesInside && isHiddenInside(node))
+
+  private fun isHiddenInside(node: AccessibilityNodeInfoCompat): Boolean {
+    synchronized(hiddenInsideCache) { hiddenInsideCache[node]?.let { return it } }
+    val hidden = node.ancestors().any { resolve(it)?.hidesDescendants == true }
+    synchronized(hiddenInsideCache) { hiddenInsideCache[node] = hidden }
+    return hidden
+  }
 
   fun clearCache() {
     synchronized(cache) { cache.clear() }
+    synchronized(hiddenInsideCache) { hiddenInsideCache.clear() }
   }
 
   private inner class Index(entries: List<Entry>) {
@@ -93,6 +109,7 @@ private constructor(
         id?.let { byId[it].orEmpty() + byId[it.substringAfter(":id/", it)].orEmpty() }
       val (activity, window) = front()
       val packageName = node.packageName?.toString()
+      if (packageName == ownPackage) return emptyList()
       return (idMatches.orEmpty() + byMatch)
         .distinct()
         .filter { entry ->
@@ -106,34 +123,39 @@ private constructor(
     }
   }
 
-  private fun merge(entries: List<Entry>): NodeRule? {
-    if (entries.isEmpty()) {
-      return null
-    }
-    fun <T> first(pick: (ScriptRule) -> T?): T? = entries.firstNotNullOfOrNull { pick(it.rule) }
-    val hide = first { it.hide.takeIf { hide -> hide != Hide.NONE } }
-    return NodeRule(
-      label = first { it.label },
-      speak = first { it.speak },
-      hide = hide != null,
-      hideInside = hide == Hide.ALL,
-      role = first { it.role }?.let(ScriptRoles::of),
-      state = first { it.state },
-      hint = first { it.hint },
-      heading = first { it.heading },
-      group = entries.any { it.rule.group },
-      order = first(::orderOf),
-      sources = entries.map { it.source },
-    )
-  }
-
   companion object {
     private const val CACHE_SIZE = 512
 
-    val EMPTY = ScriptRules(emptyList(), emptyList()) { null to null }
+    val EMPTY = ScriptRules(emptyList(), emptyList(), null) { null to null }
+
+    /**
+     * Combines the rules that match one item, earliest first. For each thing a rule can change, the
+     * first rule that sets it wins.
+     */
+    fun mergeRules(rules: List<ScriptRule>, sources: List<String> = emptyList()): NodeRule? {
+      if (rules.isEmpty()) {
+        return null
+      }
+      fun <T> first(pick: (ScriptRule) -> T?): T? = rules.firstNotNullOfOrNull(pick)
+      val hide = first { it.hide.takeIf { hide -> hide != Hide.NONE } }
+      return NodeRule(
+        label = first { it.label },
+        speak = first { it.speak },
+        hide = hide != null,
+        hideInside = hide == Hide.ALL,
+        role = first { it.role }?.let(ScriptRoles::of),
+        state = first { it.state },
+        hint = first { it.hint },
+        heading = first { it.heading },
+        group = rules.any { it.group },
+        order = first(::orderOf),
+        sources = sources,
+      )
+    }
 
     fun of(
       runtimes: Collection<ScriptRuntime>,
+      ownPackage: String?,
       front: () -> Pair<String?, String?>,
     ): ScriptRules {
       val all =
@@ -152,8 +174,11 @@ private constructor(
           it.rule.actions.isNotEmpty() &&
             it.runtime.allowed(ScriptPermission.INPUT, "Actions in rules")
         }
-      return if (all.isEmpty()) EMPTY else ScriptRules(entries, actionEntries, front)
+      return if (all.isEmpty()) EMPTY else ScriptRules(entries, actionEntries, ownPackage, front)
     }
+
+    private fun orderOf(rule: ScriptRule): NodeOverrides.Order? =
+      rule.readBefore?.let { ReadOrder(true, it) } ?: rule.readAfter?.let { ReadOrder(false, it) }
 
     private fun aspectsOf(rule: ScriptRule): List<RuleAspect> =
       listOfNotNull(
@@ -167,9 +192,6 @@ private constructor(
         RuleAspect.ORDER.takeIf { rule.readBefore != null || rule.readAfter != null },
       )
   }
-
-  private fun orderOf(rule: ScriptRule): NodeOverrides.Order? =
-    rule.readBefore?.let { ReadOrder(true, it) } ?: rule.readAfter?.let { ReadOrder(false, it) }
 
   private class ReadOrder(private val before: Boolean, private val target: NodeQuery) :
     NodeOverrides.Order {

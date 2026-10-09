@@ -57,6 +57,12 @@ interface ScriptHost {
 
   fun itemActions(node: AccessibilityNodeInfoCompat): List<ScriptItemAction>
 
+  /**
+   * Turns every script off, or back on, without changing each script's own switch. Returns whether
+   * scripts are now on, or null if this device cannot run them.
+   */
+  fun toggleAll(): Boolean?
+
   fun shutdown()
 }
 
@@ -193,6 +199,8 @@ object Scripts {
   @JvmStatic
   fun itemActions(node: AccessibilityNodeInfoCompat): List<ScriptItemAction> =
     host?.itemActions(node).orEmpty()
+
+  @JvmStatic fun toggleAll(): Boolean? = host?.toggleAll()
 
   private fun group(node: AccessibilityNodeInfoCompat): NodeRule? =
     rule(node, RuleAspect.GROUP)?.takeIf { it.group }

@@ -74,8 +74,12 @@ class NodeBridge(private val showPasswords: Boolean) {
 
   fun children(handle: Int): JSONArray = JSONArray(node(handle).children().map(::snapshot))
 
-  fun find(root: AccessibilityNodeInfoCompat, query: JSONObject, limit: Int): JSONArray =
-    JSONArray(NodeQuery.of(query).findIn(root, limit, ::textOf).map(::snapshot))
+  fun find(
+    root: AccessibilityNodeInfoCompat,
+    query: JSONObject,
+    limit: Int,
+    deadline: Long,
+  ): JSONArray = JSONArray(NodeQuery.of(query).findIn(root, limit, ::textOf, deadline).map(::snapshot))
 
   fun textOf(node: AccessibilityNodeInfoCompat): String? =
     node.text?.toString().takeUnless { node.isPassword && !showPasswords }

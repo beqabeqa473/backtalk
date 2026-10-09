@@ -30,7 +30,8 @@ enum class ScriptPermission(val key: String, val sensitive: Boolean, @StringRes 
   CLIPBOARD("clipboard", true, R.string.script_permission_clipboard),
   SYSTEM("system", true, R.string.script_permission_system),
   NOTIFICATIONS("notifications", true, R.string.script_permission_notifications),
-  EVENTS("events", true, R.string.script_permission_events);
+  EVENTS("events", true, R.string.script_permission_events),
+  DIALOGS("dialogs", true, R.string.script_permission_dialogs);
 
   companion object {
     fun fromKey(key: String): ScriptPermission? = entries.firstOrNull { it.key == key }

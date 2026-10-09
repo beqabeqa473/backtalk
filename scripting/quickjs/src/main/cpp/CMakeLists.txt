@@ -16,6 +16,9 @@ cmake_minimum_required(VERSION 3.22.1)
 project(backtalkquickjs LANGUAGES C)
 
 include(FetchContent)
+# Renovate proposes new versions of this (see renovate.json). It can't work out the checksum, so
+# update URL_HASH by hand with the version, and the license in src/main/assets/quickjs if its
+# copyright lines changed.
 FetchContent_Declare(
   quickjs
   URL https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.17.0.tar.gz

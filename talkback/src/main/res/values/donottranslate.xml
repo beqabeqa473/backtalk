@@ -1233,6 +1233,7 @@
   <string name="shortcut_value_announce_status" translatable="false">ANNOUNCE_STATUS</string>
   <string name="shortcut_value_inspect_item" translatable="false">INSPECT_ITEM</string>
   <string name="shortcut_value_copy_screen_tree" translatable="false">COPY_SCREEN_TREE</string>
+  <string name="shortcut_value_toggle_scripts" translatable="false">TOGGLE_SCRIPTS</string>
   <string name="shortcut_value_announce_current_title" translatable="false">ANNOUNCE_CURRENT_TITLE</string>
   <string name="shortcut_value_repeat_last_spoken_phrase" translatable="false">REPEAT_LAST_SPOKEN_PHRASE</string>
   <string name="shortcut_value_spell_last_spoken_phrase" translatable="false">SPELL_LAST_SPOKEN_PHRASE</string>

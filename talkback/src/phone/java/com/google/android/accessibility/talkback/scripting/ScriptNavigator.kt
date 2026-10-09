@@ -16,6 +16,7 @@
 
 package com.google.android.accessibility.talkback.scripting
 
+import android.os.SystemClock
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import com.google.android.accessibility.talkback.R
 import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils
@@ -44,6 +45,7 @@ class ScriptNavigator(private val manager: ScriptManager) {
     matches: (AccessibilityNodeInfoCompat) -> Boolean,
   ): Pair<List<Match>, Int> {
     val found = mutableListOf<Match>()
+    val deadline = SystemClock.uptimeMillis() + ScriptRuntime.CALL_LIMIT_MS
     var index = 0
     var focusAt = -1
     fun visit(node: AccessibilityNodeInfoCompat, depth: Int) {
@@ -53,7 +55,7 @@ class ScriptNavigator(private val manager: ScriptManager) {
       match?.let(found::add)
       if (depth < MAX_DEPTH) {
         for (child in node.children()) {
-          if (index >= MAX_VISITED) break
+          if (index >= MAX_VISITED || SystemClock.uptimeMillis() > deadline) break
           visit(child, depth + 1)
         }
       }

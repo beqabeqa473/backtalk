@@ -46,6 +46,7 @@ class ScriptSpeechHooks(private val handler: Handler) {
     arg: (ScriptRuntime) -> Any?,
   ): String? {
     val chain = chains[hook].orEmpty().filter(accepts).ifEmpty { return null }
+    if (ScriptThread.heldUpFor(WAIT_MS)) return null
     return handler.await(WAIT_MS, hook) { runChain(chain, hook, input, arg) }
   }
 
@@ -82,7 +83,8 @@ class ScriptSpeechHooks(private val handler: Handler) {
     const val LIMIT_MS = 250L
     val PERMISSIONS: Map<String, ScriptPermission?> =
       mapOf(
-        "focus" to null,
+        // The focus hook is given the item and what Backtalk will say for it, in every app.
+        "focus" to ScriptPermission.SCREEN,
         "speech" to ScriptPermission.SPEECH,
         "notification" to ScriptPermission.NOTIFICATIONS,
         "announcement" to ScriptPermission.SCREEN,

@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import org.json.JSONObject
 
 class ScriptActivation(private val service: AccessibilityService) {
+  private val ownPackage = service.packageName
   private var activePackage: String? = null
   private var focusedPackage: String? = null
   private val activityByPackage = HashMap<String, String>()
@@ -53,12 +54,23 @@ class ScriptActivation(private val service: AccessibilityService) {
       jsonObject("package" to activePackage, "activity" to activity, "window" to windowTitle)
   }
 
+  /**
+   * Whether a Backtalk screen is in front. Scripts change nothing there: one that silences speech,
+   * hides items or takes over gestures would otherwise leave no way to reach Scripts in Backtalk's
+   * settings and turn it off. Scripts for all apps stay loaded, so that their settings still reach
+   * them.
+   */
+  @Volatile
+  var inBacktalk = false
+    private set
+
   fun wants(script: InstalledScript): Boolean =
     script.enabled &&
       (script.manifest.isGlobal ||
         script.manifest.apps.any {
-          it.matchesFront(activePackage, activity, windowTitle) ||
-            (focusedPackage != activePackage && it.matchesOther(focusedPackage))
+          it.packageName != ownPackage &&
+            (it.matchesFront(activePackage, activity, windowTitle) ||
+              (focusedPackage != activePackage && it.matchesOther(focusedPackage)))
         })
 
   private fun readActiveWindow() {
@@ -68,6 +80,7 @@ class ScriptActivation(private val service: AccessibilityService) {
         it.isActive && it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
       } ?: windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: return
     activePackage = active.root?.packageName?.toString() ?: return
+    inBacktalk = activePackage == ownPackage
     windowTitle = active.title?.toString()
   }
 }

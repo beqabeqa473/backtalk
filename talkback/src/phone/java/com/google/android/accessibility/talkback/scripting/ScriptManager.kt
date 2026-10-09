@@ -55,12 +55,12 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   private var lastApp: JSONObject? = null
   private var rulesSource: List<Pair<InstalledScript, List<ScriptRule>>> = emptyList()
 
+  @Volatile private var closed = false
   @Volatile private var rules = ScriptRules.EMPTY
   @Volatile private var bindings = ScriptBindings.EMPTY
 
   init {
     store.addListener(this)
-    onScriptThread { store.installBuiltInExampleOnce() }
     evaluate()
   }
 
@@ -70,7 +70,7 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
         activation.onWindowStateChanged(event)
         evaluate()
         val info = activation.appInfo
-        onScriptThread { loaded.values.toList().forEach { it.notify("windowChange", info) } }
+        onScriptThread { loaded.values.toList().forEach { it.notifyApp("windowChange", info) } }
       }
       AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
         mainHandler.removeCallbacks(evaluateRunnable)
@@ -88,6 +88,11 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
     node: AccessibilityNodeInfoCompat,
     speech: CharSequence,
   ): CharSequence? {
+    // Scripts leave Backtalk's own screens alone, so its settings can always be used to turn a
+    // script off.
+    if (node.packageName?.toString() == service.packageName) {
+      return null
+    }
     val rule = rules.resolve(node, RuleAspect.SPEAK)
     if (rule?.hide == true) {
       return ""
@@ -102,6 +107,9 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   }
 
   override fun rewriteEventSpeech(event: AccessibilityEvent, speech: CharSequence): CharSequence? {
+    if (activation.inBacktalk) {
+      return null
+    }
     val packageName = event.packageName?.toString()
     return when (event.eventType) {
       AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
@@ -119,7 +127,7 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   }
 
   override fun filterSpeech(speech: CharSequence): CharSequence? =
-    if (speechHooks.hasListeners("speech")) {
+    if (!activation.inBacktalk && speechHooks.hasListeners("speech")) {
       speechHooks.rewrite("speech", speech.toString()) { JSONObject.NULL }
     } else {
       null
@@ -139,7 +147,8 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
   }
 
   override fun onGesture(name: String, fallback: Runnable): Boolean =
-    bindings.gestures[name]?.also { runCommand(it, "gesture", fallback = fallback) } != null
+    !activation.inBacktalk &&
+      bindings.gestures[name]?.also { runCommand(it, "gesture", fallback = fallback) } != null
 
   override fun onKeys(
     modifiers: Int,
@@ -147,6 +156,9 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
     withBacktalkModifier: Boolean,
     fallback: Runnable,
   ): Boolean {
+    if (activation.inBacktalk) {
+      return false
+    }
     val pressed = ScriptInput.Keys(modifiers, keyCode)
     val prefix = layer?.takeIf { SystemClock.uptimeMillis() - layerTime < LAYER_TIMEOUT_MS }
     if (prefix != null && KeyEvent.isModifierKey(keyCode)) {
@@ -190,14 +202,21 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
       bindings.navigation.map { bound ->
         val key = "${bound.runtime.id}/navigation/${bound.index}"
         ScriptReadingControl(key, bound.navigation.title) { isNext ->
-          navigator.move(bound.runtime, bound.navigation.query, isNext)
+          // The search visits every item on screen, so it stays off the main thread.
+          onScriptThread { navigator.move(bound.runtime, bound.navigation.query, isNext) }
         }
       }
 
   override fun itemActions(node: AccessibilityNodeInfoCompat): List<ScriptItemAction> =
-    actions.of(node, rules)
+    if (activation.inBacktalk) emptyList() else actions.of(node, rules)
+
+  override fun toggleAll(): Boolean {
+    store.allOff = !store.allOff
+    return !store.allOff
+  }
 
   override fun shutdown() {
+    closed = true
     store.removeListener(this)
     mainHandler.removeCallbacks(evaluateRunnable)
     onScriptThread {
@@ -260,6 +279,10 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
 
   private fun evaluate() {
     mainHandler.removeCallbacks(evaluateRunnable)
+    // A change to the script list can still be on its way here after the engine was stopped.
+    if (closed) {
+      return
+    }
     activation.refresh()
     rules.clearCache()
     val info = activation.appInfo
@@ -277,8 +300,8 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
       loaded.values
         .filter { it.script.manifest.isGlobal }
         .forEach {
-          it.notify("appLeave", previousApp)
-          it.notify("appEnter", info)
+          it.notifyApp("appLeave", previousApp)
+          it.notifyApp("appEnter", info)
         }
     }
     wanted.filter { it.id !in loaded }.forEach { load(it, info) }
@@ -309,7 +332,7 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
         ScriptLog.add(script.id, ScriptLog.Level.WARN, it)
       }
     }
-    runtime.notify("appEnter", info)
+    runtime.notifyApp("appEnter", info)
   }
 
   private fun failLoading(runtime: ScriptRuntime, message: String, interrupted: Boolean) {
@@ -319,7 +342,7 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
 
   private fun unload(runtime: ScriptRuntime, app: JSONObject) {
     if (!runtime.script.manifest.isGlobal) {
-      runtime.notify("appLeave", app, UNLOAD_LIMIT_MS)
+      runtime.notifyApp("appLeave", app, UNLOAD_LIMIT_MS)
     }
     runtime.close()
     loaded.remove(runtime.id)
@@ -333,7 +356,10 @@ class ScriptManager(val service: AccessibilityService, val feedback: ScriptFeedb
       return
     }
     rulesSource = source
-    rules = ScriptRules.of(loaded.values) { activation.activity to activation.windowTitle }
+    rules =
+      ScriptRules.of(loaded.values, service.packageName) {
+        activation.activity to activation.windowTitle
+      }
     mainHandler.post { TraversalTreeCache.clear("script rules") }
   }
 

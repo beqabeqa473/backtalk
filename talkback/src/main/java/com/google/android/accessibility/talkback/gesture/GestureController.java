@@ -684,9 +684,17 @@ public class GestureController {
     } else if (action.equals(service.getString(R.string.shortcut_value_copy_screen_tree))) {
       AccessibilityNodeInfoCompat focused =
           accessibilityFocusMonitor.getAccessibilityFocus(false);
-      result =
-          pipeline.returnFeedback(
-              eventId, Feedback.speech(ItemInspector.copyScreenTree(service, focused)));
+      ItemInspector.copyScreenTree(
+          service,
+          focused,
+          message -> pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(message)));
+    } else if (action.equals(service.getString(R.string.shortcut_value_toggle_scripts))) {
+      @Nullable Boolean scriptsOn = Scripts.toggleAll();
+      int message =
+          scriptsOn == null
+              ? R.string.scripts_unavailable
+              : scriptsOn ? R.string.scripts_now_on : R.string.scripts_now_off;
+      result = pipeline.returnFeedback(eventId, Feedback.speech(service.getString(message)));
     } else if (FeatureFlagReader.enableAnnounceCurrentTitle(service)
         && action.equals(service.getString(R.string.shortcut_value_announce_current_title))) {
       result =
@@ -772,7 +780,8 @@ public class GestureController {
         GestureShortcutMapping.getGestureString(service, gestureId),
         action);
     String fallbackAction = action;
-    if (Scripts.onGesture(gestureId, () -> performAction(fallbackAction, eventId))) {
+    if (!turnsScriptsOff(action)
+        && Scripts.onGesture(gestureId, () -> performAction(fallbackAction, eventId))) {
       return;
     }
     performAction(action, eventId);
@@ -791,6 +800,14 @@ public class GestureController {
       this.captureFingerprintGestureIdToAnnouncements.putAll(
           captureFingerprintGestureIdToAnnouncements);
     }
+  }
+
+  /**
+   * Whether the action is the one that turns all scripts off. Scripts are never offered the gesture
+   * it is assigned to, so a script that takes over gestures can't take that one.
+   */
+  private boolean turnsScriptsOff(@Nullable String action) {
+    return service.getString(R.string.shortcut_value_toggle_scripts).equals(action);
   }
 
   private boolean gestureHandledByTraining(int gestureId, boolean isFingerprintGesture) {
@@ -860,7 +877,9 @@ public class GestureController {
         fingerprintGestureId,
         GestureShortcutMapping.getFingerprintGestureString(service, fingerprintGestureId),
         action);
-    if (Scripts.onFingerprintGesture(fingerprintGestureId, () -> performAction(action, eventId))) {
+    if (!turnsScriptsOff(action)
+        && Scripts.onFingerprintGesture(
+            fingerprintGestureId, () -> performAction(action, eventId))) {
       return;
     }
     performAction(action, eventId);

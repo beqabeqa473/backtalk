@@ -14,6 +14,22 @@
     <string name="scripts_category_global">Global plugins</string>
     <!-- Shown when no scripts are installed. [CHAR LIMIT=NONE] -->
     <string name="scripts_none">No scripts installed</string>
+    <!-- Switch that turns every script off at once without changing which ones are on. [CHAR LIMIT=40] -->
+    <string name="scripts_all_off">Turn off all scripts</string>
+    <!-- Summary of the switch that turns every script off. [CHAR LIMIT=NONE] -->
+    <string name="scripts_all_off_summary">Scripts stay installed and keep their own switches. The Turn all scripts on or off gesture does the same.</string>
+    <!-- Gesture and keyboard action that turns every script off, or back on. [CHAR LIMIT=NONE] -->
+    <string name="shortcut_toggle_scripts">Turn all scripts on or off</string>
+    <!-- Spoken when every script was turned off. [CHAR LIMIT=NONE] -->
+    <string name="scripts_now_off">Scripts off</string>
+    <!-- Spoken when scripts were turned back on. [CHAR LIMIT=NONE] -->
+    <string name="scripts_now_on">Scripts on</string>
+    <!-- Spoken when this device cannot run scripts. [CHAR LIMIT=NONE] -->
+    <string name="scripts_unavailable">Scripts are not available on this device</string>
+    <!-- Button that adds the example script that comes with Backtalk. [CHAR LIMIT=40] -->
+    <string name="script_add_example">Add the example script</string>
+    <!-- Summary of the button that adds the example script. [CHAR LIMIT=NONE] -->
+    <string name="script_add_example_summary">Says the name of each app you switch to. A script to start from.</string>
     <!-- A script is turned on. [CHAR LIMIT=20] -->
     <string name="script_state_on">On</string>
     <!-- A script is turned off. [CHAR LIMIT=20] -->
@@ -41,6 +57,10 @@
     <string name="script_update_new_permissions">New permissions:</string>
     <!-- Button that updates a script. [CHAR LIMIT=20] -->
     <string name="script_update_button">Update</string>
+    <!-- Says which installed script an import replaces. [CHAR LIMIT=NONE] -->
+    <string name="script_update_replaces">This replaces version <xliff:g id="version">%1$s</xliff:g> by <xliff:g id="author">%2$s</xliff:g>, and keeps its data and settings.</string>
+    <!-- Warns that an import replaces a script by someone else. [CHAR LIMIT=NONE] -->
+    <string name="script_update_other_author">The new one is by <xliff:g id="author">%1$s</xliff:g>, a different author. Update only if you trust it.</string>
     <!-- Shown after a script is installed. [CHAR LIMIT=NONE] -->
     <string name="script_installed"><xliff:g id="name">%1$s</xliff:g> installed</string>
     <!-- Shown after a script is updated. [CHAR LIMIT=NONE] -->
@@ -70,6 +90,10 @@
     <string name="script_permission_notifications">Read and change spoken notifications</string>
     <!-- What the events permission lets a script do. [CHAR LIMIT=NONE] -->
     <string name="script_permission_events">See all activity in every app, including typing</string>
+    <!-- What the dialogs permission lets a script do. [CHAR LIMIT=NONE] -->
+    <string name="script_permission_dialogs">Show dialogs over any app</string>
+    <!-- Title of a dialog a script shows, so that it is clear the dialog is the script's and not the app's or the system's. [CHAR LIMIT=NONE] -->
+    <string name="script_dialog_title"><xliff:g id="script">%1$s</xliff:g>: <xliff:g id="title">%2$s</xliff:g></string>
 
     <!-- Switch that turns a script on. [CHAR LIMIT=40] -->
     <string name="script_enabled">Turn on</string>

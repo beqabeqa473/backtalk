@@ -511,6 +511,12 @@ public final class GestureListPreference extends AccessibilitySuiteDialogPrefere
             resources.getString(R.string.shortcut_value_copy_screen_tree),
             TYPE_ACTION_ITEM));
 
+    builder.add(
+        new ActionItem(
+            resources.getString(R.string.shortcut_toggle_scripts),
+            resources.getString(R.string.shortcut_value_toggle_scripts),
+            TYPE_ACTION_ITEM));
+
     if (FeatureFlagReader.enableAnnounceCurrentTimeAndDate(getContext())) {
       builder.add(
           new ActionItem(

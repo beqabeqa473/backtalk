@@ -16,6 +16,7 @@
 
 package com.google.android.accessibility.talkback.scripting
 
+import android.os.SystemClock
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONObject
 
@@ -41,22 +42,31 @@ data class NodeQuery(
       (role == null || ScriptRoles.appRole(node) == role) &&
       (parentId == null || idMatches(parentId, node.parent?.viewIdResourceName))
 
+  /**
+   * Finds items under [root], and stops early at [deadline], a [SystemClock.uptimeMillis] time.
+   * Every item visited is a call to the app, so a large screen can take longer than a script is
+   * given.
+   */
   fun findIn(
     root: AccessibilityNodeInfoCompat,
     limit: Int = 1,
     textOf: TextOf = PLAIN_TEXT,
+    deadline: Long = Long.MAX_VALUE,
   ): List<AccessibilityNodeInfoCompat> = buildList {
     val stack = ArrayDeque(listOf(root))
     var visited = 0
     while (stack.isNotEmpty() && visited++ < MAX_VISITED && size < limit) {
+      if (SystemClock.uptimeMillis() > deadline) break
       val node = stack.removeLast()
       if (matches(node, textOf)) add(node)
       stack += node.children().asReversed()
     }
   }
 
-  fun firstIn(root: AccessibilityNodeInfoCompat): AccessibilityNodeInfoCompat? =
-    findIn(root).firstOrNull()
+  fun firstIn(
+    root: AccessibilityNodeInfoCompat,
+    deadline: Long = Long.MAX_VALUE,
+  ): AccessibilityNodeInfoCompat? = findIn(root, deadline = deadline).firstOrNull()
 
   private fun contains(node: AccessibilityNodeInfoCompat, textOf: TextOf, part: String): Boolean =
     listOf(textOf(node), node.contentDescription?.toString()).any {

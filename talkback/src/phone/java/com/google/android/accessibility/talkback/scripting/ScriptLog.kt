@@ -17,6 +17,7 @@
 package com.google.android.accessibility.talkback.scripting
 
 import android.util.Log
+import com.google.android.libraries.accessibility.utils.log.LogUtils
 
 object ScriptLog {
   const val TAG = "BacktalkScript"
@@ -34,7 +35,9 @@ object ScriptLog {
   private val entries = HashMap<String, ArrayDeque<Entry>>()
 
   fun add(id: String, level: Level, message: String) {
-    Log.println(level.priority, TAG, "[$id] $message")
+    // Scripts can log what is on screen or in notifications, so it only goes to logcat at the log
+    // level chosen in developer settings. The script's own log screen always has it.
+    LogUtils.log(TAG, level.priority, "[%s] %s", id, message)
     synchronized(entries) {
       entries.getOrPut(id) { ArrayDeque() }.apply {
         addLast(Entry(System.currentTimeMillis(), level, message))

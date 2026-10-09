@@ -20,6 +20,7 @@ import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.content.ClipboardManager
 import android.os.Handler
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.os.bundleOf
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
@@ -28,6 +29,7 @@ import com.google.android.accessibility.scripting.quickjs.QuickJsException
 import com.google.android.accessibility.talkback.R
 import com.google.android.accessibility.talkback.scripting.ScriptPermission.ACTIONS
 import com.google.android.accessibility.talkback.scripting.ScriptPermission.CLIPBOARD
+import com.google.android.accessibility.talkback.scripting.ScriptPermission.DIALOGS
 import com.google.android.accessibility.talkback.scripting.ScriptPermission.INPUT
 import com.google.android.accessibility.talkback.scripting.ScriptPermission.NETWORK
 import com.google.android.accessibility.talkback.scripting.ScriptPermission.PASSWORDS
@@ -72,6 +74,9 @@ class ScriptRuntime(
   private val fetches = HashSet<Future<*>>()
   private val warned = HashSet<String>()
   private var nextPromise = 1
+  // When the script's current call runs out of time. QuickJS only stops JavaScript, so host calls
+  // that walk the screen stop at this themselves.
+  private var deadline = Long.MAX_VALUE
   private val calls: Map<String, HostCall> = hostCalls()
 
   @Throws(QuickJsException::class)
@@ -79,15 +84,19 @@ class ScriptRuntime(
     val runtime = QuickJs(this, MEMORY_LIMIT, STACK_LIMIT).also { js = it }
     val main =
       store.readFile(id, ScriptPackage.MAIN) ?: throw QuickJsException("main.js is missing")
-    runtime.evalScript(prelude, "prelude.js", LOAD_LIMIT_MS)
-    runtime.evalModule(main.decodeToString(), ScriptPackage.MAIN, LOAD_LIMIT_MS)
+    ScriptThread.busy {
+      timed(LOAD_LIMIT_MS) { runtime.evalScript(prelude, "prelude.js", LOAD_LIMIT_MS) }
+      timed(LOAD_LIMIT_MS) {
+        runtime.evalModule(main.decodeToString(), ScriptPackage.MAIN, LOAD_LIMIT_MS)
+      }
+    }
   }
 
   fun dispatch(type: String, data: Any?, timeLimitMs: Long = CALL_LIMIT_MS): String? {
     val runtime = js?.takeUnless { it.isClosed } ?: return null
     return try {
       val event = jsonObject("type" to type, "data" to data).toString()
-      runtime.call("__bt_dispatch", event, timeLimitMs)
+      ScriptThread.busy { timed(timeLimitMs) { runtime.call("__bt_dispatch", event, timeLimitMs) } }
     } catch (e: QuickJsException) {
       manager.onScriptError(this, "$type: ${e.describe()}", e.interrupted)
       null
@@ -96,6 +105,26 @@ class ScriptRuntime(
 
   fun notify(hook: String, data: Any?, timeLimitMs: Long = CALL_LIMIT_MS): String? =
     if (hook in hooks) dispatch(hook, data, timeLimitMs) else null
+
+  /**
+   * Tells the script which app is in front. A script for all apps needs the screen permission for
+   * that, or it could keep a record of the apps someone uses. A script for named apps already knows
+   * where it runs.
+   */
+  fun notifyApp(hook: String, app: Any?, timeLimitMs: Long = CALL_LIMIT_MS): String? =
+    if (hook in hooks && seesApps(handlerName(hook))) dispatch(hook, app, timeLimitMs) else null
+
+  private fun seesApps(user: String): Boolean = !script.manifest.isGlobal || allowed(SCREEN, user)
+
+  private inline fun <T> timed(timeLimitMs: Long, block: () -> T): T {
+    val outer = deadline
+    deadline = minOf(outer, SystemClock.uptimeMillis() + timeLimitMs)
+    try {
+      return block()
+    } finally {
+      deadline = outer
+    }
+  }
 
   fun close() {
     dialogs.close(id)
@@ -161,8 +190,11 @@ class ScriptRuntime(
       val translations = store.translations(id)
       jsonObject("language" to translations.language, "messages" to translations.messages)
     }
-    on("app") { manager.appInfo() }
-    on("speak") {
+    on("app") {
+      if (script.manifest.isGlobal) requirePermission(SCREEN)
+      manager.appInfo()
+    }
+    on("speak", SPEECH) {
       manager.feedback.speak(it.optString("text"), it.optBoolean("interrupt"), voice(it))
     }
     on("audio") { playAudio(it) }
@@ -178,7 +210,7 @@ class ScriptRuntime(
       promise { settle -> manager.feedback.playFile(file) { settle(true, it) } }
     }
     on("vibrate") { manager.feedback.vibrate(vibrationPattern(it.optJSONArray("pattern"))) }
-    on("resume") { manager.feedback.resume() }
+    on("resume", SYSTEM) { manager.feedback.resume() }
     on("storage.get") { args ->
       store.storageGet(id, key(args))?.let { jsonObject("value" to parseJson(it)) }
     }
@@ -196,12 +228,19 @@ class ScriptRuntime(
     on("settings.all") { store.settingsJson(script) }
     on("settings.set") { args ->
       val declared = setting(key(args)) { it.type.hasValue }
-      store.setSetting(id, declared.key, jsonOf(args.opt("value")))
+      val value = jsonOf(args.opt("value"))
+      apiCheck(value.length <= MAX_SETTING_CHARS) {
+        "A setting holds at most $MAX_SETTING_CHARS characters. Keep larger data in storage."
+      }
+      store.setSetting(id, declared.key, value)
     }
     on("settings.setOptions") { args ->
       val declared = setting(key(args)) { it.type == ScriptSetting.Type.LIST }
       val options = args.optJSONArray("options").options()
       apiCheck(options.size in 1..MAX_OPTIONS) { "A list has 1 to $MAX_OPTIONS options" }
+      apiCheck(options.sumOf { it.first.length + it.second.length } <= MAX_SETTING_CHARS) {
+        "The options of a list hold at most $MAX_SETTING_CHARS characters"
+      }
       store.setSettingOptions(id, declared.key, options)
     }
     on("rules.add", SPEECH) { args ->
@@ -230,7 +269,7 @@ class ScriptRuntime(
     on("screen.find", SCREEN) { args ->
       val root = if (args.has("root")) nodes.node(args.getInt("root")) else manager.activeRoot()
       val query = args.optJSONObject("query") ?: JSONObject()
-      root?.let { nodes.find(it, query, args.optInt("limit", 1).coerceIn(1, MAX_FIND)) }
+      root?.let { nodes.find(it, query, args.optInt("limit", 1).coerceIn(1, MAX_FIND), deadline) }
         ?: JSONArray()
     }
     on("node.parent", SCREEN) { nodes.snapshot(node(it).parent) }
@@ -270,18 +309,18 @@ class ScriptRuntime(
         args.optString("package").ifEmpty { apiError("openApp needs a package name") }
       promise { settle -> manager.feedback.openApp(packageName) { settle(true, it) } }
     }
-    on("ui.choose") { args ->
+    on("ui.choose", DIALOGS) { args ->
       val options = args.optJSONArray("options").options()
       apiCheck(options.size in 1..MAX_OPTIONS) { "choose takes 1 to $MAX_OPTIONS options" }
       val selected = args.optString("selected").ifEmpty { null }
       promise { settle -> dialogs.choose(id, title(args), options, selected) { settle(true, it) } }
     }
-    on("ui.prompt") { args ->
+    on("ui.prompt", DIALOGS) { args ->
       val text = args.optString("text")
       val hint = args.optString("hint")
       promise { settle -> dialogs.prompt(id, title(args), text, hint) { settle(true, it) } }
     }
-    on("ui.confirm") { args ->
+    on("ui.confirm", DIALOGS) { args ->
       val message = args.optString("message")
       val ok = args.optString("ok").ifEmpty { null }
       val cancel = args.optString("cancel").ifEmpty { null }
@@ -289,11 +328,11 @@ class ScriptRuntime(
         dialogs.confirm(id, title(args), message, ok, cancel) { settle(true, it) }
       }
     }
-    on("ui.alert") { args ->
+    on("ui.alert", DIALOGS) { args ->
       val message = args.optString("message")
       promise { settle -> dialogs.alert(id, title(args), message) { settle(true, null) } }
     }
-    on("ui.dialog") { args ->
+    on("ui.dialog", DIALOGS) { args ->
       val items = args.optJSONArray("items")
       apiCheck(items.items().size in 1..MAX_DIALOG_ITEMS) {
         "A dialog has 1 to $MAX_DIALOG_ITEMS items"
@@ -303,20 +342,29 @@ class ScriptRuntime(
         handler.post { dispatch("dialogEvent", event) }
       }
     }
-    on("ui.update") { args ->
+    on("ui.update", DIALOGS) { args ->
       val props = args.optJSONObject("props") ?: JSONObject()
       apiCheck(props.optJSONArray("items").items().size <= MAX_OPTIONS) {
         "A list has at most $MAX_OPTIONS items"
       }
       dialogs.update(id, args.getInt("dialog"), args.optString("item"), props)
     }
-    on("ui.close") { dialogs.close(id, it.getInt("dialog")) }
+    on("ui.close", DIALOGS) { dialogs.close(id, it.getInt("dialog")) }
     on("timer.set") { setTimer(it.getInt("id"), it.optLong("ms", 0L)) }
     on("timer.clear") { timers.remove(it.getInt("id"))?.let(handler::removeCallbacks) }
   }
 
-  private fun title(args: JSONObject): String =
-    args.optString("title").ifEmpty { script.manifest.name }
+  // Every dialog starts with the script's name. A dialog is drawn over whatever app is in front,
+  // and someone who can't see it has only the title to tell it from the app's own dialogs.
+  private fun title(args: JSONObject): String {
+    val name = script.manifest.name
+    val title = args.optString("title")
+    return if (title.isEmpty() || title == name) {
+      name
+    } else {
+      manager.service.getString(R.string.script_dialog_title, name, title)
+    }
+  }
 
   private fun changeRules(changed: Boolean) {
     if (changed) manager.onRulesChanged()
@@ -398,6 +446,7 @@ class ScriptRuntime(
 
   private fun setTimer(timerId: Int, delayMs: Long) {
     timers.remove(timerId)?.let(handler::removeCallbacks)
+    apiCheck(timers.size < MAX_TIMERS) { "A script can have at most $MAX_TIMERS timers at once" }
     val runnable = Runnable {
       if (timers.remove(timerId) != null) {
         dispatch("timer", jsonObject("id" to timerId))
@@ -460,6 +509,8 @@ class ScriptRuntime(
     private const val MAX_VIBRATION_PART_MS = 2000L
     private const val MAX_VIBRATION_MS = 5000L
     private const val MAX_FETCHES = 8
+    private const val MAX_TIMERS = 100
+    private const val MAX_SETTING_CHARS = 16 * 1024
     private const val MAX_ADDED_RULES = 200
     private const val MAX_OPTIONS = 500
     private const val MAX_DIALOG_ITEMS = 50
