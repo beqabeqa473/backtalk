@@ -16,27 +16,46 @@
 
 package com.google.android.accessibility.talkback.speechcontrol
 
+import android.app.KeyguardManager
 import android.content.Context
-import android.os.Bundle
+import android.os.SystemClock
 import androidx.annotation.MainThread
+import androidx.annotation.VisibleForTesting
 import com.google.android.accessibility.talkback.Feedback
-import com.google.android.accessibility.talkback.TalkBackService
+import com.google.android.accessibility.talkback.Pipeline
+import com.google.android.accessibility.talkback.R
 import com.google.android.accessibility.talkback.pause.PauseController
 import com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED
 import com.google.android.accessibility.utils.SharedPreferencesUtils
-import com.google.android.accessibility.utils.output.FailoverTextToSpeech.SpeechParam
-import com.google.android.accessibility.utils.output.FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-import com.google.android.accessibility.utils.output.FeedbackItem.FLAG_PROSODY_FROM_CALLER
-import com.google.android.accessibility.utils.output.SpeechController.QUEUE_MODE_INTERRUPT
+import com.google.android.accessibility.utils.output.FeedbackItem.FLAG_CLEAR_QUEUED_UTTERANCES_WITH_SAME_UTTERANCE_GROUP
+import com.google.android.accessibility.utils.output.FeedbackItem.FLAG_INTERRUPT_CURRENT_UTTERANCE_WITH_SAME_UTTERANCE_GROUP
 import com.google.android.accessibility.utils.output.SpeechController.QUEUE_MODE_QUEUE
-import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions
+import com.google.android.accessibility.utils.output.SpeechController.UTTERANCE_GROUP_OTHER_APPS
+import com.google.android.accessibility.utils.output.SpeechControllerImpl
+import com.google.android.libraries.accessibility.utils.log.LogUtils
 
+/**
+ * Lets apps the user chose speak through Backtalk, in the user's voice and settings, from
+ * [SpeechControlReceiver] and [SpeechControlService]. See docs/speech-api.md.
+ *
+ * Speech from other apps can't be turned against the user:
+ * - Nothing is said unless Let other apps speak is on and the user allowed that app, which
+ *   Backtalk asks about the first time the app tries.
+ * - A sound plays before each thing an app says, so it can't pass for Backtalk.
+ * - Nothing is said while the device is locked, or while Backtalk is off or paused.
+ * - Each app can speak a few times at once, then about once a second, and text is cut at
+ *   [SpeechControlPolicy.MAX_TEXT_LENGTH] characters.
+ * - Apps can replace or stop only speech from other apps, never Backtalk's own.
+ *
+ * Everything runs on the main thread.
+ */
 object SpeechControl {
+  private const val TAG = "SpeechControl"
+
   const val PERMISSION = "fyi.quin.backtalk.permission.SPEAK"
 
   const val ACTION_SPEAK = "fyi.quin.backtalk.action.SPEAK"
   const val ACTION_STOP = "fyi.quin.backtalk.action.STOP_SPEECH"
-  const val ACTION_PAUSE = "fyi.quin.backtalk.action.PAUSE_SPEECH"
 
   const val EXTRA_TEXT = "text"
   const val EXTRA_INTERRUPT = "interrupt"
@@ -44,74 +63,123 @@ object SpeechControl {
   const val EXTRA_PITCH = "pitch"
   const val EXTRA_VOLUME = "volume"
 
-  const val EXTRA_PAUSE = "pause"
-
+  /** Must match pref_speech_control_key. */
   const val PREF_ENABLED = "pref_speech_control"
 
-  private const val MIN_SCALE = 0.25f
-  private const val MAX_SCALE = 4f
+  private var context: Context? = null
+  private var feedback: Pipeline.FeedbackReturner? = null
+  private var stopOtherAppsSpeech: Runnable? = null
+  private val rateLimiter = SpeechControlPolicy.RateLimiter()
 
-  fun isAllowed(context: Context): Boolean =
+  /** Called by Backtalk when it starts, so that apps can speak through it. */
+  @JvmStatic
+  @MainThread
+  fun attach(
+    context: Context,
+    feedback: Pipeline.FeedbackReturner,
+    speechController: SpeechControllerImpl,
+  ) {
+    attach(context, feedback) { speechController.stopUtteranceGroup(UTTERANCE_GROUP_OTHER_APPS) }
+  }
+
+  /** As [attach], with how to stop what other apps are saying, which tests replace. */
+  @VisibleForTesting
+  fun attach(context: Context, feedback: Pipeline.FeedbackReturner, stopOtherAppsSpeech: Runnable) {
+    this.context = context.applicationContext
+    this.feedback = feedback
+    this.stopOtherAppsSpeech = stopOtherAppsSpeech
+  }
+
+  /** Called by Backtalk when it stops. */
+  @JvmStatic
+  @MainThread
+  fun detach() {
+    context = null
+    feedback = null
+    stopOtherAppsSpeech = null
+    rateLimiter.clear()
+  }
+
+  fun isEnabled(context: Context): Boolean =
     SharedPreferencesUtils.getSharedPreferences(context).getBoolean(PREF_ENABLED, false)
 
-  fun clampScale(value: Float): Float =
-    if (value.isNaN()) 1f else value.coerceIn(MIN_SCALE, MAX_SCALE)
-
-  fun clampVolume(value: Float): Float = if (value.isNaN()) 1f else value.coerceIn(0f, 1f)
-
+  /**
+   * Says [text] for the first of [apps], the caller's packages, that the user allowed, and asks
+   * the user about the caller if they haven't answered. Returns whether the text was passed on to
+   * be said.
+   */
   @MainThread
   fun speak(
-    text: CharSequence,
+    apps: List<String>,
+    text: CharSequence?,
     interrupt: Boolean,
     rate: Float = 1f,
     pitch: Float = 1f,
     volume: Float = 1f,
   ): Boolean {
-    if (text.isBlank()) return false
-    val feedback = activeService()?.feedbackReturner ?: return false
-    val params =
-      Bundle().apply {
-        putFloat(SpeechParam.RATE, clampScale(rate))
-        putFloat(SpeechParam.PITCH, clampScale(pitch))
-        putFloat(SpeechParam.VOLUME, clampVolume(volume))
-      }
-    val options =
-      SpeakOptions.create()
-        .setQueueMode(if (interrupt) QUEUE_MODE_INTERRUPT else QUEUE_MODE_QUEUE)
-        .setFlags(FLAG_PROSODY_FROM_CALLER or FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE)
-        .setSpeechParams(params)
-    return feedback.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(text, options))
-  }
-
-  @MainThread
-  fun stop(): Boolean {
-    val service = activeService() ?: return false
-    service.interruptAllFeedback(false)
-    return true
-  }
-
-  @MainThread
-  fun pause(pause: Boolean): Boolean {
-    val service = activeService() ?: return false
-    val feedback = service.feedbackReturner ?: return false
-    if (service.speechController.readyToPause() != pause) return false
-    if (pause) {
-      if (service.actorState.continuousRead.isActive) {
-        service.interruptAllFeedback(false)
-      } else {
-        service.interruptFullScreenReadActor()
-      }
+    val app = allowedApp(apps) ?: return false
+    val feedback = feedback ?: return false
+    val context = context ?: return false
+    if (context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
+      LogUtils.i(TAG, "Ignored speech from %s, since the device is locked", app)
+      return false
     }
+    val say = SpeechControlPolicy.textToSay(text) ?: return false
+    if (!rateLimiter.tryAcquire(app, SystemClock.uptimeMillis())) {
+      LogUtils.i(TAG, "Ignored speech from %s, since it is speaking too often", app)
+      return false
+    }
+    val options =
+      ExternalSpeech.options(
+        QUEUE_MODE_QUEUE,
+        ExternalSpeech.params(
+          SpeechControlPolicy.clampScale(rate),
+          SpeechControlPolicy.clampScale(pitch),
+          SpeechControlPolicy.clampVolume(volume),
+        ),
+        // Replaces only what other apps were saying, never Backtalk's own speech.
+        if (interrupt) {
+          FLAG_CLEAR_QUEUED_UTTERANCES_WITH_SAME_UTTERANCE_GROUP or
+            FLAG_INTERRUPT_CURRENT_UTTERANCE_WITH_SAME_UTTERANCE_GROUP
+        } else {
+          0
+        },
+      )
+    options.setUtteranceGroup(UTTERANCE_GROUP_OTHER_APPS)
+    // The sound marks the speech as another app's.
     return feedback.returnFeedback(
       EVENT_ID_UNTRACKED,
-      Feedback.speech(Feedback.Speech.Action.PAUSE_OR_RESUME),
+      Feedback.speech(say, options).sound(R.raw.chime_up),
     )
   }
 
-  @MainThread fun isSpeaking(): Boolean = activeService()?.speechController?.isSpeaking == true
+  /** Stops what other apps are saying, for the first of [apps] that the user allowed. */
+  @MainThread
+  fun stop(apps: List<String>): Boolean {
+    allowedApp(apps) ?: return false
+    val stop = stopOtherAppsSpeech ?: return false
+    stop.run()
+    return true
+  }
 
-  private fun activeService(): TalkBackService? =
-    TalkBackService.getInstance()?.takeIf {
-      TalkBackService.isServiceActive() && !PauseController.isPaused()
+  /**
+   * The first of [apps] that may speak now, or null. Asks the user about the first one they
+   * haven't answered for.
+   */
+  private fun allowedApp(apps: List<String>): String? {
+    val context = context ?: return null
+    if (!isEnabled(context)) {
+      LogUtils.i(TAG, "Ignored a request, since other apps may not speak")
+      return null
     }
+    if (PauseController.isPaused()) return null
+    val prefs = SharedPreferencesUtils.getSharedPreferences(context)
+    val allowed =
+      apps.firstOrNull { SpeechControlApps.state(prefs, it) == SpeechControlApps.State.ALLOWED }
+    if (allowed != null) return allowed
+    apps
+      .firstOrNull { SpeechControlApps.state(prefs, it) == SpeechControlApps.State.UNKNOWN }
+      ?.let { SpeechControlApproval.ask(context, it) }
+    return null
+  }
 }

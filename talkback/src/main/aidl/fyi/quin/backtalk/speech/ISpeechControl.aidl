@@ -16,11 +16,17 @@
 
 package fyi.quin.backtalk.speech;
 
-import fyi.quin.backtalk.speech.ISpeakingCallback;
-
+/**
+ * Lets an app the user allowed speak through Backtalk. See docs/speech-api.md.
+ */
 oneway interface ISpeechControl {
+    /**
+     * Says text in the user's Backtalk voice, after a short sound. Rate and pitch are multiples
+     * of the user's own, from 0.25 to 4, and volume is from 0 to 1. With interrupt, it replaces
+     * what other apps were saying, but never Backtalk's own speech.
+     */
     void speak(String text, boolean interrupt, float rate, float pitch, float volume);
+
+    /** Stops what other apps are saying. */
     void stop();
-    void pause(boolean pause);
-    void isSpeaking(ISpeakingCallback callback);
 }

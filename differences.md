@@ -515,6 +515,12 @@ Hooks that change or suppress speech take priority over queued script work and s
 
 Scripts run on phones and tablets only. [Writing Backtalk scripts](docs/scripting.md) describes the whole API, and [docs/scripting/examples](docs/scripting/examples) has a script to start from.
 
+### Speech from other apps
+
+Apps can ask Backtalk to say text in your own Backtalk voice, for example a game, an automation app such as Tasker, or a remote-access tool. To allow this, turn on **Advanced settings** > **Let other apps speak**. It's off by default.
+
+The first time an app asks, Backtalk posts a notification that asks whether to allow it, and nothing the app sends is said until you choose **Allow**. You can allow or block each app later in **Let other apps speak**. A short sound plays before each thing another app says, so you can tell it apart from Backtalk. Nothing is said while the device is locked, an app can speak only a few times in a row, and apps can never stop or cut off Backtalk's own speech. [Speaking through Backtalk from another app](docs/speech-api.md) describes the API for app developers.
+
 ### Inspect focused item and Copy screen tree
 
 **Inspect focused item** says the focused item's id, class, role, app, activity and window, and copies them, so that scripts can name the item. **Copy screen tree** copies every item on screen as JSON. Assign either to a gesture in gesture settings, or add it to the Backtalk menu in **Customize menus** > **Backtalk menu**.

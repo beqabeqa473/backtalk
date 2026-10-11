@@ -19,28 +19,35 @@ package com.google.android.accessibility.talkback.speechcontrol
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.google.android.libraries.accessibility.utils.log.LogUtils
 
+/**
+ * Takes speech requests sent as broadcasts. Backtalk has to know which app sent each one, to ask
+ * the user about it, so a broadcast is only taken from Android 14, and only when the app shares
+ * its identity with BroadcastOptions.setShareIdentityEnabled. Apps that can't can bind to
+ * [SpeechControlService] instead.
+ */
 class SpeechControlReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
-    if (!SpeechControl.isAllowed(context)) {
-      LogUtils.i(TAG, "Ignored %s, since other apps may not speak", intent.action)
+    val sender =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) sentFromPackage else null
+    if (sender == null) {
+      LogUtils.i(TAG, "Ignored %s, since the app that sent it didn't share its identity", intent.action)
       return
     }
+    val apps = listOf(sender)
     when (intent.action) {
-      SpeechControl.ACTION_SPEAK -> {
-        val text = intent.getCharSequenceExtra(SpeechControl.EXTRA_TEXT) ?: return
+      SpeechControl.ACTION_SPEAK ->
         SpeechControl.speak(
-          text,
+          apps,
+          intent.getStringExtra(SpeechControl.EXTRA_TEXT),
           interrupt = intent.getBooleanExtra(SpeechControl.EXTRA_INTERRUPT, false),
           rate = floatExtra(intent, SpeechControl.EXTRA_RATE),
           pitch = floatExtra(intent, SpeechControl.EXTRA_PITCH),
           volume = floatExtra(intent, SpeechControl.EXTRA_VOLUME),
         )
-      }
-      SpeechControl.ACTION_STOP -> SpeechControl.stop()
-      SpeechControl.ACTION_PAUSE ->
-        SpeechControl.pause(intent.getBooleanExtra(SpeechControl.EXTRA_PAUSE, true))
+      SpeechControl.ACTION_STOP -> SpeechControl.stop(apps)
     }
   }
 

@@ -18,14 +18,16 @@ package com.google.android.accessibility.talkback.speechcontrol
 
 import android.app.Service
 import android.content.Intent
+import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.RemoteException
-import com.google.android.libraries.accessibility.utils.log.LogUtils
-import fyi.quin.backtalk.speech.ISpeakingCallback
 import fyi.quin.backtalk.speech.ISpeechControl
 
+/**
+ * Takes speech requests from apps that bind to it. Each call is checked against the app that made
+ * it, which Android tells Backtalk, so it works on every version.
+ */
 class SpeechControlService : Service() {
   private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -38,46 +40,19 @@ class SpeechControlService : Service() {
         pitch: Float,
         volume: Float,
       ) {
-        if (text == null) return
-        onMainThread { SpeechControl.speak(text, interrupt, rate, pitch, volume) }
+        val apps = callingApps()
+        mainHandler.post { SpeechControl.speak(apps, text, interrupt, rate, pitch, volume) }
       }
 
       override fun stop() {
-        onMainThread { SpeechControl.stop() }
-      }
-
-      override fun pause(pause: Boolean) {
-        onMainThread { SpeechControl.pause(pause) }
-      }
-
-      override fun isSpeaking(callback: ISpeakingCallback?) {
-        if (callback == null) return
-        if (!onMainThread { answer(callback, SpeechControl.isSpeaking()) }) {
-          answer(callback, false)
-        }
+        val apps = callingApps()
+        mainHandler.post { SpeechControl.stop(apps) }
       }
     }
 
   override fun onBind(intent: Intent): IBinder = binder
 
-  private fun onMainThread(block: () -> Unit): Boolean {
-    if (!SpeechControl.isAllowed(this)) {
-      LogUtils.i(TAG, "Ignored a call, since other apps may not speak")
-      return false
-    }
-    mainHandler.post(block)
-    return true
-  }
-
-  private fun answer(callback: ISpeakingCallback, speaking: Boolean) {
-    try {
-      callback.onResult(speaking)
-    } catch (e: RemoteException) {
-      LogUtils.w(TAG, "The app that asked is gone: %s", e)
-    }
-  }
-
-  private companion object {
-    const val TAG = "SpeechControlService"
-  }
+  /** The packages of the app making the current call. Read on the binder thread, before posting. */
+  private fun callingApps(): List<String> =
+    packageManager.getPackagesForUid(Binder.getCallingUid())?.toList().orEmpty()
 }

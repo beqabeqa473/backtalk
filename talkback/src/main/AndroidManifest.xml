@@ -417,9 +417,12 @@
             <intent-filter>
                 <action android:name="fyi.quin.backtalk.action.SPEAK" />
                 <action android:name="fyi.quin.backtalk.action.STOP_SPEECH" />
-                <action android:name="fyi.quin.backtalk.action.PAUSE_SPEECH" />
             </intent-filter>
         </receiver>
+        <!-- Saves the user's answer from the notification that asks whether an app may speak. -->
+        <receiver
+            android:name="com.google.android.accessibility.talkback.speechcontrol.SpeechControlApproval$AnswerReceiver"
+            android:exported="false" />
         <service
             android:name="com.google.android.accessibility.talkback.speechcontrol.SpeechControlService"
             android:exported="true"
