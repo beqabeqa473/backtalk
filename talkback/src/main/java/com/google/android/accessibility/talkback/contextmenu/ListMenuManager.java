@@ -27,8 +27,10 @@ import static com.google.android.accessibility.talkback.Feedback.Speech.Action.S
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CONTEXT;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CUSTOM_ACTION;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.LANGUAGE;
+import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.VOICE_PROFILE;
 import static com.google.android.accessibility.talkback.eventprocessor.EventState.EVENT_SKIP_FOCUS_SYNC_FROM_VIEW_FOCUSED;
 
+import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
@@ -63,6 +65,8 @@ import com.google.android.accessibility.talkback.contextmenu.radial.RadialMenuCo
 import com.google.android.accessibility.talkback.eventprocessor.EventState;
 import com.google.android.accessibility.talkback.focusmanagement.AccessibilityFocusMonitor;
 import com.google.android.accessibility.talkback.focusmanagement.record.FocusActionRecord;
+import com.google.android.accessibility.talkback.gesture.GestureHints;
+import com.google.android.accessibility.talkback.gesture.GestureShortcutMapping;
 import com.google.android.accessibility.talkback.menurules.NodeMenuRuleProcessor;
 import com.google.android.accessibility.utils.AccessibilityEventListener;
 import com.google.android.accessibility.utils.AccessibilityServiceCompatUtils;
@@ -128,6 +132,7 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
     CONTEXT,
     CUSTOM_ACTION,
     LANGUAGE,
+    VOICE_PROFILE,
   }
 
   public ListMenuManager(
@@ -242,9 +247,7 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
                   .setQueueMode(SpeechController.QUEUE_MODE_FLUSH_ALL)
                   .setFlags(
                       FeedbackItem.FLAG_NO_HISTORY
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                          | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE)));
+                          | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL)));
       return false;
     }
     if (menuId == CONTEXT) {
@@ -254,8 +257,7 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
     if (menuId == CONTEXT
         && currentDialog != null
         && !SettingsUtils.allowLinksOutOfSettings(service)) {
-      String titleContentDescription =
-          service.getString(R.string.talkback_menu_title_content_description);
+      String titleContentDescription = menuTitleContentDescription();
       if (FormFactorUtils.isAndroidTv()) {
         new Handler(Looper.getMainLooper())
             .post(() -> attachContentDescriptionOnTitle(currentDialog, titleContentDescription));
@@ -264,6 +266,25 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
       }
     }
     return true;
+  }
+
+  /**
+   * The menu title as read in setup, which says to swipe right to explore the menu. If swiping right
+   * no longer moves to the next item, it names the user's gesture for that instead.
+   */
+  private String menuTitleContentDescription() {
+    GestureShortcutMapping mapping = service.getGestureShortcutMapping();
+    if (mapping == null
+        || GestureHints.isAssigned(
+            service,
+            mapping,
+            AccessibilityService.GESTURE_SWIPE_RIGHT,
+            service.getString(R.string.shortcut_value_next))) {
+      return service.getString(R.string.talkback_menu_title_content_description);
+    }
+    return service.getString(R.string.talkback_menu_title)
+        + "\n\n"
+        + GestureHints.actionLine(service, mapping, R.string.shortcut_value_next);
   }
 
   private void prepareMenu(ContextMenu menu, MenuId menuId) {
@@ -286,6 +307,9 @@ public class ListMenuManager implements WindowEventHandler, AccessibilityEventLi
       // Menu for language switcher
       LanguageMenuProcessor.prepareLanguageMenu(service, pipeline, actorState, menu);
       menu.setTitle(service.getString(R.string.language_options));
+    } else if (menuId == VOICE_PROFILE) {
+      VoiceProfileMenuProcessor.prepareVoiceProfileMenu(service, pipeline, menu);
+      menu.setTitle(service.getString(R.string.title_selector_voice_profile));
     }
   }
 

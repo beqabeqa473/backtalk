@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 25
 
       # Caches Gradle and validates the wrapper jar checksum.
       - uses: gradle/actions/setup-gradle@v6
@@ -45,6 +45,25 @@ jobs:
       # AGP downloads the SDK platform and NDK it needs if the runner lacks them.
       - name: Build debug APKs
         run: ./gradlew assembleDebug --console=plain
+
+      # Only the phone flavor: the watch's braille keyboard is a stub, so the braille keyboard's
+      # tests don't compile for it, and the rest of the code is shared.
+      - name: Run unit tests
+        run: ./gradlew testPhoneDebugUnitTest --console=plain
+
+      # The app's lint also checks the library modules. Issues already in lint-baseline.xml are
+      # allowed, so this fails only on new errors, such as a call that needs a newer Android than
+      # minSdk without a version check.
+      - name: Run lint
+        run: ./gradlew :lintPhoneDebug --console=plain
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            build/reports/lint-results-phoneDebug.html
 
       - uses: actions/upload-artifact@v7
         with:

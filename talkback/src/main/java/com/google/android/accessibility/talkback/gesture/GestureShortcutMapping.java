@@ -477,6 +477,11 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
         R.string.shortcut_value_toggle_voice_feedback, R.string.shortcut_toggle_voice_feedback),
     SHOW_LANGUAGE_OPTIONS(
         R.string.shortcut_value_show_language_options, R.string.shortcut_show_language_options),
+    VOICE_PROFILES(R.string.shortcut_value_voice_profiles, R.string.shortcut_voice_profiles),
+    PREVIOUS_VOICE_PROFILE(
+        R.string.shortcut_value_previous_voice_profile, R.string.shortcut_previous_voice_profile),
+    NEXT_VOICE_PROFILE(
+        R.string.shortcut_value_next_voice_profile, R.string.shortcut_next_voice_profile),
 
     // Menu control.
     TALKBACK_BREAKOUT(
@@ -549,6 +554,9 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
     ANNOUNCE_BATTERY_STATE(
         R.string.shortcut_value_announce_battery_state, R.string.shortcut_announce_battery_state),
     ANNOUNCE_STATUS(R.string.shortcut_value_announce_status, R.string.shortcut_announce_status),
+    INSPECT_ITEM(R.string.shortcut_value_inspect_item, R.string.shortcut_inspect_item),
+    COPY_SCREEN_TREE(R.string.shortcut_value_copy_screen_tree, R.string.shortcut_copy_screen_tree),
+    TOGGLE_SCRIPTS(R.string.shortcut_value_toggle_scripts, R.string.shortcut_toggle_scripts),
     ANNOUNCE_PHONETIC_PRONUNCIATION(
         R.string.shortcut_value_announce_phonetic_pronunciation,
         R.string.shortcut_announce_phonetic_pronunciation),
@@ -761,6 +769,11 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
         : shortcut;
   }
 
+  @Override
+  public CharSequence screenSearchNoKeywordHint() {
+    return GestureHints.screenSearchNoKeywordHint(context, this);
+  }
+
   /**
    * Gets corresponding action from gesture-action mappings.
    *
@@ -851,6 +864,11 @@ public class GestureShortcutMapping implements GestureShortcutProvider {
       }
     }
     return matchedGestures;
+  }
+
+  /** Returns the action of each gesture in the current gesture set, by gesture ID. */
+  public Map<Integer, String> getGestureActions() {
+    return new HashMap<>(gestureIdToActionKey.get(currentGestureSet));
   }
 
   /**

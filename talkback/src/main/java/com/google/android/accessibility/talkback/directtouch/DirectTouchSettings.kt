@@ -34,6 +34,8 @@ object DirectTouchSettings {
   const val PREF_MASTER = "pref_direct_touch_master"
   const val PREF_SPEECH = "pref_direct_touch_speech"
   const val PREF_HAPTICS = "pref_direct_touch_haptics"
+  /** Whether a tap on a navigation bar button that takes touches directly says the button. */
+  const val PREF_NAV_BAR_SPEECH = "pref_speak_nav_bar_buttons"
   private const val PREF_APPS = "pref_direct_touch_apps"
   private const val PREF_SEEN = "pref_direct_touch_seen"
   private const val PREF_TYPING_PREFIX = "pref_direct_touch_typing_"
@@ -71,7 +73,14 @@ object DirectTouchSettings {
 
   fun isHapticsEnabled(prefs: SharedPreferences): Boolean = prefs.getBoolean(PREF_HAPTICS, false)
 
+  fun isNavBarSpeechEnabled(prefs: SharedPreferences): Boolean =
+    prefs.getBoolean(PREF_NAV_BAR_SPEECH, true)
+
   fun isAppEnabled(prefs: SharedPreferences, pkg: String): Boolean = pkg in stringSet(prefs, PREF_APPS)
+
+  /** Whether direct touch is on and turned on for any app, so that it can turn on at all. */
+  fun hasEnabledApps(prefs: SharedPreferences): Boolean =
+    isMasterEnabled(prefs) && stringSet(prefs, PREF_APPS).isNotEmpty()
 
   fun setAppEnabled(prefs: SharedPreferences, pkg: String, enabled: Boolean) {
     val apps = stringSet(prefs, PREF_APPS)

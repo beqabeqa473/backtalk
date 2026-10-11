@@ -23,9 +23,7 @@ import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.FOCUS
 import static com.google.android.accessibility.talkback.Feedback.FocusDirection.Action.SELECTION_MODE_OFF;
 import static com.google.android.accessibility.talkback.compositor.CompositorUtils.joinCharSequences;
 import static com.google.android.accessibility.talkback.utils.ClipboardUtils.copyToClipboard;
-import static com.google.android.accessibility.utils.output.FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE;
-import static com.google.android.accessibility.utils.output.FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE;
-import static com.google.android.accessibility.utils.output.FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE;
+import static com.google.android.accessibility.utils.output.FeedbackItem.FLAG_FORCE_FEEDBACK_ALL;
 import static com.google.android.accessibility.utils.output.FeedbackItem.FLAG_NO_HISTORY;
 import static com.google.android.accessibility.utils.output.SpeechController.QUEUE_MODE_INTERRUPT_AND_UNINTERRUPTIBLE_BY_NEW_SPEECH;
 import static java.lang.Math.abs;
@@ -87,9 +85,7 @@ public class TextEditActor implements VoiceDictationDelegate {
           .setQueueMode(QUEUE_MODE_INTERRUPT_AND_UNINTERRUPTIBLE_BY_NEW_SPEECH)
           .setFlags(
               FLAG_NO_HISTORY
-                  | FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                  | FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                  | FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+                  | FLAG_FORCE_FEEDBACK_ALL);
 
   ////////////////////////////////////////////////////////////////////////////////////////////////
   // Inner class for actor-state reader
@@ -297,9 +293,7 @@ public class TextEditActor implements VoiceDictationDelegate {
     SpeakOptions speakOptions =
         SpeakOptions.create()
             .setFlags(
-                FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                    | FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                    | FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+                FLAG_FORCE_FEEDBACK_ALL);
     pipeline.returnFeedback(eventId, Feedback.speech(textToSpeak, speakOptions));
 
     return true;

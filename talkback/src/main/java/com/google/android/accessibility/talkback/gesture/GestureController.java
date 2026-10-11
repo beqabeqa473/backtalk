@@ -61,6 +61,7 @@ import static com.google.android.accessibility.talkback.actor.TalkBackUIActor.Ty
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CONTEXT;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CUSTOM_ACTION;
 import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.LANGUAGE;
+import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.VOICE_PROFILE;
 import static com.google.android.accessibility.talkback.trainingcommon.PageConfig.ANNOUNCE_REAL_ACTION;
 import static com.google.android.accessibility.talkback.trainingcommon.PageConfig.UNKNOWN_ANNOUNCEMENT;
 import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
@@ -104,11 +105,14 @@ import com.google.android.accessibility.talkback.menurules.RuleTextFormatting;
 import com.google.android.accessibility.talkback.monitor.BatteryMonitor;
 import com.google.android.accessibility.talkback.monitor.VolumeMonitor;
 import com.google.android.accessibility.talkback.monitor.VolumeMonitor.VolumeChangedListener;
+import com.google.android.accessibility.talkback.scripting.ItemInspector;
+import com.google.android.accessibility.talkback.scripting.Scripts;
 import com.google.android.accessibility.talkback.selector.SelectorController;
 import com.google.android.accessibility.talkback.selector.SelectorController.AnnounceType;
 import com.google.android.accessibility.talkback.selector.SelectorController.Setting;
 import com.google.android.accessibility.talkback.status.StatusReader;
 import com.google.android.accessibility.talkback.trainingcommon.TrainingActivity;
+import com.google.android.accessibility.talkback.trainingcommon.content.TutorialGestureUses;
 import com.google.android.accessibility.talkback.utils.DateTimeUtils;
 import com.google.android.accessibility.talkback.utils.DebugProperties;
 import com.google.android.accessibility.talkback.utils.FocusIndicatorUtils;
@@ -398,6 +402,12 @@ public class GestureController {
       result = menuManager.showMenu(CUSTOM_ACTION, eventId);
     } else if (action.equals(service.getString(R.string.shortcut_value_show_language_options))) {
       result = menuManager.showMenu(LANGUAGE, eventId);
+    } else if (action.equals(service.getString(R.string.shortcut_value_voice_profiles))) {
+      result = menuManager.showMenu(VOICE_PROFILE, eventId, R.string.no_voice_profiles);
+    } else if (action.equals(service.getString(R.string.shortcut_value_previous_voice_profile))) {
+      selectorController.changeVoiceProfile(eventId, /* isNext= */ false);
+    } else if (action.equals(service.getString(R.string.shortcut_value_next_voice_profile))) {
+      selectorController.changeVoiceProfile(eventId, /* isNext= */ true);
     } else if (action.equals(service.getString(R.string.shortcut_value_previous_granularity))) {
       result = pipeline.returnFeedback(eventId, Feedback.focusDirection(PREVIOUS_GRANULARITY));
     } else if (action.equals(service.getString(R.string.shortcut_value_next_granularity))) {
@@ -666,6 +676,26 @@ public class GestureController {
     } else if (action.equals(service.getString(R.string.shortcut_value_announce_status))) {
       result =
           pipeline.returnFeedback(eventId, Feedback.speech(statusReader.describe()));
+    } else if (action.equals(service.getString(R.string.shortcut_value_inspect_item))) {
+      AccessibilityNodeInfoCompat focused =
+          accessibilityFocusMonitor.getAccessibilityFocus(false);
+      result =
+          pipeline.returnFeedback(
+              eventId, Feedback.speech(ItemInspector.inspect(service, focused)));
+    } else if (action.equals(service.getString(R.string.shortcut_value_copy_screen_tree))) {
+      AccessibilityNodeInfoCompat focused =
+          accessibilityFocusMonitor.getAccessibilityFocus(false);
+      ItemInspector.copyScreenTree(
+          service,
+          focused,
+          message -> pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(message)));
+    } else if (action.equals(service.getString(R.string.shortcut_value_toggle_scripts))) {
+      @Nullable Boolean scriptsOn = Scripts.toggleAll();
+      int message =
+          scriptsOn == null
+              ? R.string.scripts_unavailable
+              : scriptsOn ? R.string.scripts_now_on : R.string.scripts_now_off;
+      result = pipeline.returnFeedback(eventId, Feedback.speech(service.getString(message)));
     } else if (FeatureFlagReader.enableAnnounceCurrentTitle(service)
         && action.equals(service.getString(R.string.shortcut_value_announce_current_title))) {
       result =
@@ -750,6 +780,11 @@ public class GestureController {
         gestureId,
         GestureShortcutMapping.getGestureString(service, gestureId),
         action);
+    String fallbackAction = action;
+    if (!turnsScriptsOff(action)
+        && Scripts.onGesture(gestureId, () -> performAction(fallbackAction, eventId))) {
+      return;
+    }
     performAction(action, eventId);
   }
 
@@ -768,6 +803,14 @@ public class GestureController {
     }
   }
 
+  /**
+   * Whether the action is the one that turns all scripts off. Scripts are never offered the gesture
+   * it is assigned to, so a script that takes over gestures can't take that one.
+   */
+  private boolean turnsScriptsOff(@Nullable String action) {
+    return service.getString(R.string.shortcut_value_toggle_scripts).equals(action);
+  }
+
   private boolean gestureHandledByTraining(int gestureId, boolean isFingerprintGesture) {
     // TalkBack can ignore the gesture, which is handled by OnGestureListener.onCaptureGesture(), if
     // captured gesture list exists and the current window is training.
@@ -781,6 +824,15 @@ public class GestureController {
     // Checked last: it asks the app for the window's nodes, which holds up every gesture.
     if (!isOnTrainingPage()) {
       return false;
+    }
+
+    // An announcement says what the gesture does by default. If the user gave the gesture another
+    // action, say the gesture and that action instead.
+    if (!isFingerprintGesture
+        && feedbackResId != ANNOUNCE_REAL_ACTION
+        && !TutorialGestureUses.announcementStillTrue(
+            service, feedbackResId, gestureShortcutMapping.getActionKeyFromGestureId(gestureId))) {
+      feedbackResId = ANNOUNCE_REAL_ACTION;
     }
 
     String feedbackString;
@@ -835,6 +887,11 @@ public class GestureController {
         fingerprintGestureId,
         GestureShortcutMapping.getFingerprintGestureString(service, fingerprintGestureId),
         action);
+    if (!turnsScriptsOff(action)
+        && Scripts.onFingerprintGesture(
+            fingerprintGestureId, () -> performAction(action, eventId))) {
+      return;
+    }
     performAction(action, eventId);
   }
 
@@ -915,9 +972,7 @@ public class GestureController {
         SpeakOptions.create()
             .setFlags(
                 FeedbackItem.FLAG_NO_HISTORY
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                    | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE);
+                    | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL);
     pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.speech(text, speakOptions));
   }
 
@@ -988,10 +1043,7 @@ public class GestureController {
                 .setQueueMode(SpeechController.QUEUE_MODE_INTERRUPT)
                 .setFlags(
                     FeedbackItem.FLAG_NO_HISTORY
-                        | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE
-                        | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE
-                        | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE
-                        | FeedbackItem.FLAG_FORCE_FEEDBACK_EVEN_IF_PHONE_CALL_ACTIVE
+                        | FeedbackItem.FLAG_FORCE_FEEDBACK_ALL
                         | FeedbackItem.FLAG_SKIP_DUPLICATE)));
 
     pipeline.returnFeedback(

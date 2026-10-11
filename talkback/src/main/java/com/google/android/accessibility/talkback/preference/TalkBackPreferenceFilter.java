@@ -149,6 +149,8 @@ public class TalkBackPreferenceFilter {
     CUSTOM_LABELS(
         R.string.pref_manage_labels_key,
         HIDDEN_ON_TV | HIDDEN_SETUP | HIDDEN_ON_XR),
+    // Scripts run on phones only; the watch build has no Scripts screen to open.
+    SCRIPTS(R.string.pref_scripts_key, HIDDEN_ON_WATCH),
     SINGLE_TAP_ACTIVATION(
         R.string.pref_single_tap_key, HIDDEN_ON_TV | HIDDEN_ON_XR),
     REDUCE_WINDOW_DELAY(
@@ -236,6 +238,8 @@ public class TalkBackPreferenceFilter {
     EXPLORE_BY_TOUCH(R.string.pref_explore_by_touch_reflect_key, HIDDEN_ON_TV | HIDDEN_ON_XR),
     // Gesture/Verbosity Settings.
     CONFIG_PHYSICAL_KEYBOARD_ECHO(R.string.pref_keyboard_echo_physical_key, HIDDEN_ON_WATCH),
+    INTERRUPT_TYPING(R.string.pref_interrupt_typing_key, HIDDEN_ON_WATCH),
+    INTERRUPT_ENTER(R.string.pref_interrupt_enter_key, HIDDEN_ON_WATCH),
     LIMIT_FREQUENT_CONTENT_CHANGE_ANNOUNCEMENT(
         R.string.pref_allow_frequent_content_change_announcement_key, HIDE_FREQUENT_UPDATE_UI_FLAG),
     SPEAK_WHEN_SCREEN_OFF(R.string.pref_screenoff_key, HIDDEN_ON_XR),
